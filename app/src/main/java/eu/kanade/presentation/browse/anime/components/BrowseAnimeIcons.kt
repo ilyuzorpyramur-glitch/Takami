@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -30,6 +31,7 @@ import com.tadami.aurora.R
 import eu.kanade.domain.source.anime.model.icon
 import eu.kanade.presentation.components.rememberThemeAwareCoverErrorPainter
 import eu.kanade.tachiyomi.extension.anime.model.AnimeExtension
+import eu.kanade.tachiyomi.takami.TakamiForge
 import eu.kanade.tachiyomi.extension.anime.util.AnimeExtensionLoader
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.domain.source.anime.model.AnimeSource
@@ -45,6 +47,18 @@ fun AnimeSourceIcon(
     modifier: Modifier = Modifier,
 ) {
     val icon = source.icon
+    val siteIcon = remember(source.id) { TakamiForge.iconModelOf(source.id) }
+
+    if (siteIcon != null) {
+        AsyncImage(
+            model = siteIcon,
+            contentDescription = null,
+            placeholder = ColorPainter(Color(0x1F888888)),
+            error = painterResource(R.mipmap.ic_default_source),
+            modifier = modifier.then(defaultModifier),
+        )
+        return
+    }
 
     when {
         source.isStub && icon == null -> {

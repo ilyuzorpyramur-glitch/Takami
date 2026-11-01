@@ -150,6 +150,14 @@ object TakamiForge {
 
     fun sources(): List<AnimeSource> = _specs.value.map { VirtualAnimeSource(it, engine) }
 
+    /** Иконка источника: своя картинка, если выбрана, иначе иконка сайта. */
+    fun iconModelOf(sourceId: Long): Any? {
+        val spec = _specs.value.firstOrNull { it.sourceId == sourceId } ?: return null
+        val local = spec.iconPath?.let { java.io.File(it) }
+        if (local != null && local.exists()) return local
+        return spec.iconUrl?.takeIf { it.isNotBlank() }
+    }
+
     fun source(host: String): VirtualAnimeSource? = _specs.value
         .firstOrNull { it.host == host }
         ?.let { VirtualAnimeSource(it, engine) }

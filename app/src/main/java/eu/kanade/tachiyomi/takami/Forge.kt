@@ -144,14 +144,23 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         return host
     }
 
+    /**
+     * Иконка сайта: сначала крупные варианты (apple-touch-icon, og:image),
+     * favicon.ico в конце — он мелкий и часто не рисуется.
+     */
     private fun iconOf(doc: Document, pageUrl: String): String? {
-        val link = doc.selectFirst("link[rel=apple-touch-icon], link[rel~=icon]")
+        doc.selectFirst("link[rel=apple-touch-icon]")
             ?.let { it.absUrl("href").ifBlank { it.attr("href") } }
-            ?.takeIf { it.isNotBlank() }
-        if (link != null) return link
+            ?.takeIf { it.isNotBlank() && !it.endsWith(".ico") }
+            ?.let { return it }
 
-        return doc.selectFirst("meta[property=og:image]")
+        doc.selectFirst("meta[property=og:image]")
             ?.attr("content")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+
+        return doc.selectFirst("link[rel~=icon]")
+            ?.let { it.absUrl("href").ifBlank { it.attr("href") } }
             ?.takeIf { it.isNotBlank() }
     }
 
