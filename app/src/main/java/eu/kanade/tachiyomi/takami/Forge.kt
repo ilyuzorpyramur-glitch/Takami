@@ -41,13 +41,18 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             }
         }
 
+        lastCardSelector = card?.selector ?: "article"
+        lastCardChoice = card
+
         val chosen = card ?: return@withContext ForgeResult.Failure(
             "Не нашёл карточки тайтлов на главной: сайт отдаёт разметку, которую я пока не разбираю " +
                 "(проверил " + candidates.size + " вариантов)",
         )
 
         val title = siteName(doc, host)
-        val pagination = paginationFor(detected, doc)
+        val basePath = pathOf(url)
+        val pagination = verifyPagination(baseUrl, basePath, paginationFor(detected, doc), sample.firstOrNull()?.url)
+        val latestPath = findLatestFeed(baseUrl, basePath, detected, sample.firstOrNull()?.url)
         // Первый тайтл каталога часто оказывается фильмом без серий.
         // Смотрим несколько карточек и берём ту, где серии действительно есть.
         var detail = sample.firstOrNull()?.url ?: pickDetailPage(doc, url, chosen) ?: url
@@ -79,7 +84,8 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             engine = detected,
             iconUrl = iconOf(doc, url),
             catalog = CatalogSpec(
-                path = pathOf(url),
+                path = basePath,
+                latestPath = latestPath,
                 itemSelector = chosen.selector,
                 linkSelector = chosen.linkSelector,
                 titleSelector = chosen.titleSelector,
@@ -113,8 +119,8 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
                 " found=" + bestCount + " iframe=" + hasIframe
         }
 
-        val checks = SelfCheck(engine).run(spec)
-        ForgeResult.Built(spec, checks, detail)
+        val report = SelfCheck(engine).report(spec)
+        ForgeResult.Built(spec, report.checks, detail, report.dubbings, report.qualities)
     }
 
     /** Признаки движка прямо в разметке — то же, что делает AniLabX при разборе новых сайтов. */
@@ -215,6 +221,9 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         }
     }
 
+    private var lastCardSelector: String = "article"
+    private var lastCardChoice: CardChoice? = null
+
     private fun draftSpec(
         baseUrl: String,
         host: String,
@@ -234,6 +243,46 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             posterSelector = card.posterSelector,
         ),
     )
+
+    /**
+     * Проверяем пагинацию делом: если вторая страница не отличается,
+     * значит сайт её не отдаёт — и обещать «есть ещё» нельзя.
+     */
+    private suspend fun verifyPagination(
+        baseUrl: String,
+        path: String,
+        pagination: PaginationSpec,
+        firstUrl: String?,
+    ): PaginationSpec {
+        if (pagination.kind == "none") return pagination
+        val probe = draftSpec(baseUrl, "probe", CardChoice(".x", "a", null, null), path, SiteSpec.ENGINE_GENERIC)
+        val pageUrl = engine.pageUrl(baseUrl, path, pagination, 2)
+        val html = runCatching { engine.fetch(pageUrl) }.getOrNull() ?: return PaginationSpec("none", "")
+        val parsed = runCatching { engine.parseCatalogue(probe.copy(catalog = probe.catalog.copy(itemSelector = lastCardSelector)), html, pageUrl) }
+            .getOrNull() ?: return PaginationSpec("none", "")
+        val differs = parsed.first.isNotEmpty() && parsed.first.firstOrNull()?.url != firstUrl
+        return if (differs) pagination else PaginationSpec("none", "")
+    }
+
+    /** Лента новинок: ищем раздел по годам, который реально отличается от главной. */
+    private suspend fun findLatestFeed(
+        baseUrl: String,
+        path: String,
+        engineName: String,
+        firstUrl: String?,
+    ): String? {
+        val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+        for (candidate in listOf("/year/" + year + "/", "/year/" + (year - 1) + "/")) {
+            val probe = draftSpec(baseUrl, "probe", lastCardChoice ?: return null, candidate, engineName)
+            val pageUrl = baseUrl.trimEnd('/') + candidate
+            val html = runCatching { engine.fetch(pageUrl) }.getOrNull() ?: continue
+            val parsed = runCatching { engine.parseCatalogue(probe, html, pageUrl) }.getOrNull() ?: continue
+            if (parsed.first.size >= MIN_CARDS && parsed.first.firstOrNull()?.url != firstUrl) {
+                return candidate
+            }
+        }
+        return null
+    }
 
     private fun countEpisodes(doc: Document, choice: EpisodeChoice): Int {
         return doc.select(choice.selector).count { node ->
@@ -344,6 +393,12 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
 }
 
 sealed class ForgeResult {
-    data class Built(val spec: SiteSpec, val checks: List<CheckResult>, val sampleDetailUrl: String) : ForgeResult()
+    data class Built(
+        val spec: SiteSpec,
+        val checks: List<CheckResult>,
+        val sampleDetailUrl: String,
+        val dubbings: List<String> = emptyList(),
+        val qualities: List<String> = emptyList(),
+    ) : ForgeResult()
     data class Failure(val reason: String) : ForgeResult()
 }

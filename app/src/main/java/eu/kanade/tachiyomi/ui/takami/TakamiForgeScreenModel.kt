@@ -32,6 +32,8 @@ sealed interface ForgeState {
         val url: String,
         val spec: SiteSpec,
         val checks: List<CheckResult>,
+        val dubbings: List<String> = emptyList(),
+        val qualities: List<String> = emptyList(),
     ) : ForgeState
 }
 
@@ -63,7 +65,13 @@ class TakamiForgeScreenModel(
                 .getOrElse { ForgeResult.Failure(it.message ?: it.toString()) }
 
             _state.value = when (result) {
-                is ForgeResult.Built -> ForgeState.Ready(url, result.spec, result.checks)
+                is ForgeResult.Built -> ForgeState.Ready(
+                    url = url,
+                    spec = result.spec,
+                    checks = result.checks,
+                    dubbings = result.dubbings,
+                    qualities = result.qualities,
+                )
                 is ForgeResult.Failure -> ForgeState.Failed(url, result.reason)
             }
         }
@@ -73,10 +81,15 @@ class TakamiForgeScreenModel(
         _state.value = ForgeState.Idle
     }
 
-    fun save() {
+    fun save(iconPath: String? = null, quality: String = "auto", dubbings: List<String> = emptyList()) {
         val ready = _state.value as? ForgeState.Ready ?: return
         screenModelScope.launch {
-            val saved = TakamiForge.save(ready.spec)
+            val chosen = ready.spec.copy(
+                iconPath = iconPath ?: ready.spec.iconPath,
+                qualityPreference = quality,
+                dubbings = dubbings,
+            )
+            val saved = TakamiForge.save(chosen)
             _saved.value = TakamiForge.specs.value
             _events.send(ForgeEvent.Saved(saved.name))
             _state.value = ForgeState.Idle

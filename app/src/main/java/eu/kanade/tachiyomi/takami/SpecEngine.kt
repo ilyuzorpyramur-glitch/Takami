@@ -140,11 +140,16 @@ class SpecEngine(
                 val number = numberRegex.find(label)?.groupValues?.last()?.toFloatOrNull()
                     ?: if (e.linkAttr != "href") (index + 1).toFloat() else return@mapIndexedNotNull null
 
+                val dubbing = dubbingOf(item, doc)
+                if (spec.dubbings.isNotEmpty() && dubbing != null && dubbing !in spec.dubbings) {
+                    return@mapIndexedNotNull null
+                }
+
                 SEpisode.create().apply {
                     url = href
                     name = when {
+                        dubbing != null -> dubbing + " (" + number.toInt() + ")"
                         label.isBlank() -> "Серия " + number.toInt()
-                        !e.nameFromText -> "Серия " + number.toInt()
                         numberRegex.containsMatchIn(label) -> label
                         else -> label + " (" + number.toInt() + ")"
                     }
@@ -203,10 +208,49 @@ class SpecEngine(
             depth++
         }
 
-        return links.map { (url, label) ->
-            Video(url, label.ifBlank { qualityOf(url) }, url)
+        val videos = links.map { (url, label) ->
+            val quality = normalizeQuality(label).ifBlank { qualityOf(url) }
+            Video(url, quality, url)
+        }
+
+        return when (spec.qualityPreference) {
+            "max" -> videos.sortedByDescending { qualityRank(it.quality) }
+            else -> videos
         }
     }
+
+    /** Название озвучки: таб плеера, внутри которого лежит серия. */
+    private fun dubbingOf(item: Element, doc: Document): String? {
+        var node: Element? = item
+        while (node != null) {
+            val id = node.id()
+            if (id.isNotBlank()) {
+                val label = doc.selectFirst("a[href=#" + id + "]")?.text()?.trim()
+                if (!label.isNullOrBlank()) return label
+            }
+            node = node.parent()
+        }
+        return null
+    }
+
+    /** «HD» → 720p, «SD» → 480p, «720» → 720p. */
+    private fun normalizeQuality(label: String): String {
+        val clean = label.trim()
+        if (clean.isBlank()) return ""
+        val digits = QUALITY.find(clean)?.groupValues?.get(1)?.toIntOrNull()
+            ?: DIGITS.find(clean)?.value?.toIntOrNull()
+        if (digits != null && digits in 144..2160) return digits.toString() + "p"
+        return when (clean.uppercase()) {
+            "HD" -> "720p"
+            "FHD" -> "1080p"
+            "SD" -> "480p"
+            "LQ" -> "360p"
+            else -> clean
+        }
+    }
+
+    private fun qualityRank(quality: String): Int =
+        DIGITS.find(quality)?.value?.toIntOrNull() ?: 0
 
     /** Протокол-относительные адреса плееров и разметки приводим к https. */
     private fun normalizeMedia(raw: String): String {
@@ -314,6 +358,8 @@ class SpecEngine(
             """(?:https?:)?//[^\s"'<>]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"'<>]*)?""",
         )
         private val QUALITY = Regex("""[_/](\d{3,4})[_.]""")
+
+        private val DIGITS = Regex("""\d{3,4}""")
 
         private val EPISODE_HINT = Regex("""(?i)(серия|эпизод|episode|series\s*\d)""")
 

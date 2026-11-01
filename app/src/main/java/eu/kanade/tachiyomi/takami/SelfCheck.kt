@@ -17,13 +17,27 @@ data class CheckResult(
  * Проверяем только то, что зависит от спеки: каталог, вторая страница, карточка,
  * серии, медиа. Приложение, установку и прочие внешние вещи не трогаем.
  */
+data class SelfCheckReport(
+    val checks: List<CheckResult>,
+    val dubbings: List<String> = emptyList(),
+    val qualities: List<String> = emptyList(),
+)
+
 class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
 
-    suspend fun run(spec: SiteSpec): List<CheckResult> = withContext(Dispatchers.IO) {
+    suspend fun run(spec: SiteSpec): List<CheckResult> = report(spec).checks
+
+    suspend fun report(spec: SiteSpec): SelfCheckReport = withContext(Dispatchers.IO) {
         val results = mutableListOf<CheckResult>()
+        var dubbings: List<String> = emptyList()
+        var qualities: List<String> = emptyList()
 
         val (animes, hasNext) = runCatching { engine.catalogue(spec, 1) }
-            .getOrElse { return@withContext listOf(CheckResult("catalog", "Каталог", false, it.message.orEmpty())) }
+            .getOrElse {
+                return@withContext SelfCheckReport(
+                    listOf(CheckResult("catalog", "Каталог", false, it.message.orEmpty())),
+                )
+            }
 
         results += CheckResult(
             key = "catalog",
@@ -31,7 +45,7 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
             ok = animes.size >= MIN_CATALOG,
             note = animes.size.toString() + " тайтлов",
         )
-        if (animes.isEmpty()) return@withContext results
+        if (animes.isEmpty()) return@withContext SelfCheckReport(results)
 
         if (hasNext) {
             val second = runCatching { engine.catalogue(spec, 2) }.getOrNull()
@@ -83,6 +97,7 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
         val episode = episodes.firstOrNull()
         if (episode != null) {
             val videos = runCatching { engine.videos(spec, episode) }.getOrNull().orEmpty()
+            qualities = videos.map { it.quality }.filter { it.isNotBlank() }.distinct()
             val playable = videos.firstOrNull()
             val media = playable != null && looksLikeMedia(engine.probe(playable.videoUrl, episode.url))
             results += CheckResult(
@@ -97,7 +112,10 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
             )
         }
 
-        results
+        dubbings = episodes.mapNotNull { ep -> ep.name.substringBefore(" (").takeIf { "(" in ep.name } }
+            .distinct()
+
+        SelfCheckReport(results, dubbings, qualities)
     }
 
     private fun looksLikeMedia(bytes: String): Boolean =

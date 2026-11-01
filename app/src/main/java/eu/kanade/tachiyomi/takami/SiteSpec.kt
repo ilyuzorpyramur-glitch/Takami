@@ -16,6 +16,12 @@ data class SiteSpec(
     val lang: String = "ru",
     val engine: String = ENGINE_GENERIC,
     val iconUrl: String? = null,
+    /** Иконка, выбранная пользователем: путь к файлу на устройстве. */
+    val iconPath: String? = null,
+    /** auto | max — как выбирать качество из доступных. */
+    val qualityPreference: String = "auto",
+    /** Озвучки, которые нужны пользователю; пусто — все. */
+    val dubbings: List<String> = emptyList(),
     val nsfw: Boolean = false,
     val catalog: CatalogSpec,
     val details: DetailsSpec = DetailsSpec(),

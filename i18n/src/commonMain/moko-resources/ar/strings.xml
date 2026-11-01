@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">تادامي</string>
+    <string name="app_name">Takami</string>
     <string name="on">تشغيل</string>
     <string name="off">إيقاف</string>
     <string name="selected">محدد</string>
