@@ -114,32 +114,40 @@ class SpecEngine(
         }
 
         return nodes
-            .mapNotNull { item ->
+            .mapIndexedNotNull { index, item ->
                 val link = e.linkSelector
                     ?.let { sel -> item.selectFirst(sel) }
                     ?: item.takeIf { it.tagName() == "a" }
                     ?: item.selectFirst("a[href]")
                     ?: item.takeIf { it.hasAttr(e.linkAttr) }
-                    ?: return@mapNotNull null
+                    ?: return@mapIndexedNotNull null
 
                 val href = when {
                     e.linkAttr != "href" -> link.attr(e.linkAttr)
                     else -> link.absUrl("href").ifBlank { link.attr("href") }
                 }
-                if (href.isBlank()) return@mapNotNull null
+                if (href.isBlank()) return@mapIndexedNotNull null
 
                 val label = item.text().trim().ifBlank { link.text().trim() }
                 // Без явной привязки к сериям берём только похожие подписи:
                 // иначе в список попадают годы, жанры и прочие ссылки с цифрами.
-                if (e.linkAttr == "href" && !EPISODE_HINT.containsMatchIn(label)) return@mapNotNull null
-                val number = numberRegex.find(label)?.groupValues?.last()?.toFloatOrNull()
-                    ?: return@mapNotNull null
+                if (e.linkAttr == "href" && !EPISODE_HINT.containsMatchIn(label)) return@mapIndexedNotNull null
 
-                if (label.contains("фильм", true)) return@mapNotNull null
+                if (label.contains("фильм", true)) return@mapIndexedNotNull null
+
+                // У блоков плеера подпись часто — название озвучки без номера.
+                // Тогда номер берём по порядку, а подпись оставляем человеческой.
+                val number = numberRegex.find(label)?.groupValues?.last()?.toFloatOrNull()
+                    ?: if (e.linkAttr != "href") (index + 1).toFloat() else return@mapIndexedNotNull null
 
                 SEpisode.create().apply {
                     url = href
-                    name = if (e.nameFromText && label.isNotBlank()) label else "Серия " + number.toInt()
+                    name = when {
+                        label.isBlank() -> "Серия " + number.toInt()
+                        !e.nameFromText -> "Серия " + number.toInt()
+                        numberRegex.containsMatchIn(label) -> label
+                        else -> label + " (" + number.toInt() + ")"
+                    }
                     episode_number = number
                 }
             }
