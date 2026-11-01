@@ -50,8 +50,21 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
             )
         }
 
-        val sample = animes.first()
-        val details = runCatching { engine.details(spec, sample) }.getOrNull()
+        // Проверяем на нескольких тайтлах: у первого может не быть серий.
+        var sample = animes.first()
+        var details = runCatching { engine.details(spec, sample) }.getOrNull()
+        var episodes = runCatching { engine.episodes(spec, sample) }.getOrNull().orEmpty()
+
+        for (candidate in animes.drop(1).take(SAMPLE_TITLES)) {
+            if (episodes.isNotEmpty()) break
+            val next = runCatching { engine.episodes(spec, candidate) }.getOrNull().orEmpty()
+            if (next.size > episodes.size) {
+                sample = candidate
+                episodes = next
+                details = runCatching { engine.details(spec, sample) }.getOrNull()
+            }
+        }
+
         results += CheckResult(
             key = "details",
             title = "Карточка тайтла",
@@ -60,7 +73,6 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
             note = details?.title?.take(40).orEmpty(),
         )
 
-        val episodes = runCatching { engine.episodes(spec, sample) }.getOrNull().orEmpty()
         results += CheckResult(
             key = "episodes",
             title = "Серии",
@@ -94,5 +106,6 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
 
     companion object {
         private const val MIN_CATALOG = 10
+        private const val SAMPLE_TITLES = 4
     }
 }

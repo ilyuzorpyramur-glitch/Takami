@@ -46,11 +46,28 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
 
         val title = siteName(doc, host)
         val pagination = paginationFor(detected, doc)
-        val detail = sample.firstOrNull()?.url ?: pickDetailPage(doc, url, chosen) ?: url
-        val detailHtml = if (detail == url) html else runCatching { engine.fetch(detail) }.getOrDefault("")
-        val detailDoc = Jsoup.parse(detailHtml, detail)
+        // Первый тайтл каталога часто оказывается фильмом без серий.
+        // Смотрим несколько карточек и берём ту, где серии действительно есть.
+        var detail = sample.firstOrNull()?.url ?: pickDetailPage(doc, url, chosen) ?: url
+        var detailHtml = if (detail == url) html else runCatching { engine.fetch(detail) }.getOrDefault("")
+        var detailDoc = Jsoup.parse(detailHtml, detail)
+        var episodes = pickEpisodes(detailDoc)
+        var bestCount = countEpisodes(detailDoc, episodes)
 
-        val episodes = pickEpisodes(detailDoc)
+        for (candidate in sample.drop(1).take(DETAIL_SAMPLES)) {
+            if (bestCount > 0) break
+            val page = runCatching { engine.fetch(candidate.url) }.getOrNull() ?: continue
+            val parsed = Jsoup.parse(page, candidate.url)
+            val choice = pickEpisodes(parsed)
+            val count = countEpisodes(parsed, choice)
+            if (count > bestCount) {
+                detail = candidate.url
+                detailHtml = page
+                detailDoc = parsed
+                episodes = choice
+                bestCount = count
+            }
+        }
         val hasIframe = detailDoc.selectFirst("iframe[src], iframe[data-src]") != null
 
         val spec = SiteSpec(
@@ -210,6 +227,11 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         ),
     )
 
+    private fun countEpisodes(doc: Document, choice: EpisodeChoice): Int {
+        if (choice.linkAttr != "href") return doc.select(choice.selector).count { EPISODE_TEXT.containsMatchIn(it.text()) }
+        return doc.select(choice.selector).size
+    }
+
     private fun pickDetailPage(doc: Document, baseUrl: String, card: CardChoice): String? {
         val first = doc.select(card.selector).firstOrNull() ?: return null
         val link = first.selectFirst(card.linkSelector) ?: return null
@@ -276,6 +298,7 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
 
     companion object {
         private const val MIN_CARDS = 6
+        private const val DETAIL_SAMPLES = 4
         private const val MAX_GUESSES = 12
 
         private val SKIP_TAGS = setOf("html", "body", "head", "script", "style", "nav", "footer")
