@@ -205,7 +205,7 @@
     <string name="onboarding_sources_loading">جاري إضافة المستودعات، يرجى الانتظار...</string>
     <string name="onboarding_sources_tip">نصيحة: بعد الإعداد، ستتمكن من تثبيت إضافات لأنواع المحتوى المختارة من قسم \"تصفح\".</string>
     <string name="onboarding_storage_warning_title">تنبيه مهم حول التخزين</string>
-    <string name="onboarding_storage_warning_desc">لا تحدد الدليل الجذر (/storage/emulated/0) أو مجلد \"Android\" النظامي أو مجلد \"Downloads\". على Android 11+ هذه المواقع مقيدة بالتخزين المُنضبط وستؤدي إلى أخطاء في الصلاحيات والقراءة. يُرجى تحديد أو إنشاء مجلد فرعي مخصص بدلاً من ذلك (مثل \"Documents/Tadami\").</string>
+    <string name="onboarding_storage_warning_desc">لا تحدد الدليل الجذر (/storage/emulated/0) أو مجلد \"Android\" النظامي أو مجلد \"Downloads\". على Android 11+ هذه المواقع مقيدة بالتخزين المُنضبط وستؤدي إلى أخطاء في الصلاحيات والقراءة. يُرجى تحديد أو إنشاء مجلد فرعي مخصص بدلاً من ذلك (مثل \"Documents/Takami\").</string>
     <string name="onboarding_language_title">اللغة</string>
     <string name="onboarding_language_desc">اختر لغتك المفضلة. سيتابع الإعداد باللغة المختارة.</string>
     <string name="onboarding_theme_title">المظهر</string>

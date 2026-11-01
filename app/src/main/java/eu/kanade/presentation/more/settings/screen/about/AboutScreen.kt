@@ -637,7 +637,7 @@ private fun aboutFooterLinkLabel(label: AboutFooterLinkLabel): String = when (la
     AboutFooterLinkLabel.Discord -> "Discord"
     AboutFooterLinkLabel.GitHub -> "GitHub"
     AboutFooterLinkLabel.Tadami -> "Tadami"
-    AboutFooterLinkLabel.TelegramChannel -> "Telegram Channel"
+    AboutFooterLinkLabel.TelegramChannel -> "Tribute"
     AboutFooterLinkLabel.TelegramGroup -> "Telegram Group"
 }
 
@@ -672,22 +672,17 @@ internal fun buildAboutFooterSections(): List<AboutFooterLinkSection> {
             ),
         ),
         AboutFooterLinkSection(
-            title = "Tadami",
+            title = "Takami",
             links = listOf(
                 AboutFooterLink(
                     label = AboutFooterLinkLabel.Tadami,
                     icon = AboutFooterLinkIcon.Github,
-                    url = "https://github.com/andarcanum/Tadami-Aniyomi-fork",
+                    url = "https://github.com/ilyuzorpyramur-glitch/Takami",
                 ),
                 AboutFooterLink(
                     label = AboutFooterLinkLabel.TelegramChannel,
                     icon = AboutFooterLinkIcon.TelegramChannel,
-                    url = "https://t.me/TadamiApp",
-                ),
-                AboutFooterLink(
-                    label = AboutFooterLinkLabel.TelegramGroup,
-                    icon = AboutFooterLinkIcon.TelegramGroup,
-                    url = "https://t.me/TadamiSupport",
+                    url = "https://t.me/tribute/app?startapp=dT6v",
                 ),
             ),
         ),

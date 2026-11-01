@@ -117,6 +117,7 @@ class SupportProjectScreen : Screen() {
 
                 items(options, key = { it.id }) { option ->
                     val icon = when (option.id) {
+                        "tribute" -> Icons.Outlined.Favorite
                         "cloudtips" -> CloudTipsIcon
                         "boosty" -> BoostyIcon
                         "crypto_usdt_tron" -> UsdtIcon
@@ -125,6 +126,7 @@ class SupportProjectScreen : Screen() {
                     }
 
                     val brandColor = when (option.id) {
+                        "tribute" -> if (auroraColors.isDark) Color(0xFFFF7A94) else Color(0xFFE0455F)
                         "cloudtips" -> if (auroraColors.isDark) Color(0xFF00C4B4) else Color(0xFF009B8E)
                         "boosty" -> if (auroraColors.isDark) Color(0xFFF15F2C) else Color(0xFFD84B1A)
                         "crypto_usdt_tron" -> if (auroraColors.isDark) Color(0xFF009393) else Color(0xFF007575)
