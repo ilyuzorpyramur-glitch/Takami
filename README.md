@@ -1,147 +1,158 @@
 <div align="center">
-  <img src="app/src/main/res/drawable-nodpi/ic_launcher_foreground.png" alt="Tadami logo" width="160" />
-  <h1>Tadami</h1>
-  <p><strong>A polished Aniyomi fork for anime, manga, and novels (ranobe).</strong></p>
+  <img src=".github/assets/icon.png" alt="Takami" width="180" />
+  <h1>Takami · 鷹見</h1>
+  <p><strong>Форк Tadami, который сам создаёт источники по ссылке.</strong></p>
   <p>
-    <a href="https://github.com/andarcanum/Tadami-Aniyomi-fork/releases"><img src="https://img.shields.io/github/v/release/andarcanum/Tadami-Aniyomi-fork?display_name=tag" alt="Latest Release"></a>
-    <a href="LICENSE"><img src="https://img.shields.io/github/license/andarcanum/Tadami-Aniyomi-fork" alt="License"></a>
-    <a href="https://developer.android.com/about/versions/oreo"><img src="https://img.shields.io/badge/Android-8.0%2B-brightgreen" alt="Android 8+"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/ilyuzorpyramur-glitch/Takami" alt="License"></a>
+    <img src="https://img.shields.io/badge/Android-8.0%2B-brightgreen" alt="Android 8+">
+    <img src="https://img.shields.io/badge/%D1%84%D0%BE%D1%80%D0%BA-Tadami%20%2F%20Aniyomi-8a2be2" alt="Fork of Tadami">
+    <img src="https://img.shields.io/badge/%D1%81%D1%82%D0%B0%D1%82%D1%83%D1%81-%D0%B2%20%D1%80%D0%B0%D0%B7%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%BA%D0%B5-orange" alt="В разработке">
   </p>
 </div>
 
-## About
+> **Takami** — форк [Tadami](https://github.com/andarcanum/Tadami-Aniyomi-fork) (а Tadami — форк
+> [Aniyomi](https://github.com/aniyomiorg/aniyomi)). Плеер, библиотека, история, трекинг,
+> APK-расширения — всё как в апстриме. Новое одно: **источник добавляется по ссылке прямо
+> в приложении**, без сборки APK, без index.json, без ожидания релиза.
 
-Tadami is a community fork of Aniyomi with a stronger focus on UI quality, Aurora-style surfaces, and a better reading experience across anime, manga, and novels.
+---
 
-## Downloads & Release Schedule / Скачивание и Релизы
+## 🎯 Что это
 
-Requires Android 8.0+ (API 26+). Package name: `com.tadami.aurora`.
+Обычный Aniyomi-форк умеет ставить расширения из репозитория: чужой CI собрал APK,
+подписал, положил в индекс — приложение скачало. Между «сайт сломался» и «расширение
+починили» проходят дни, а между «нужен новый сайт» и «есть расширение» — недели.
 
-> [!NOTE]
-> **Release Schedule / График выходов**
-> - **GitHub Releases:** Major stable versions are released **weekly**.  
->   _Основные (стабильные) версии публикуются на GitHub **еженедельно**._
+Takami убирает этот круг. Ты вставляешь ссылку на сайт — приложение:
 
-- **Stable Releases:** [GitHub Releases](https://github.com/andarcanum/Tadami-Aniyomi-fork/releases)
+1. **разбирает** главную страницу и определяет движок (DLE, WordPress, JSON API, обычный HTML);
+2. **собирает** описание источника: каталог, пагинация, карточка, детали, серии, плеер, фильтры;
+3. **проверяет себя** тем же набором проверок, которым я гоняю расширения на стенде;
+4. **добавляет** источник в список — с иконкой, названием, версией и кнопкой «Проверить снова».
 
-## Screenshots
+Источник живёт на устройстве: он не приходит из сети и никуда не уходит.
 
-| Home | Library | Update | Browse |
-| --- | --- | --- | --- |
-| <img src="screenshots/1.jpg" alt="Home" width="240" /> | <img src="screenshots/2.jpg" alt="Library" width="240" /> | <img src="screenshots/3.jpg" alt="Update" width="240" /> | <img src="screenshots/4.jpg" alt="Browse" width="240" /> |
+## ✨ Чем отличается от Tadami
 
-| Title card | Title card 2 | More |
-| --- | --- | --- |
-| <img src="screenshots/5.jpg" alt="Title card" width="240" /> | <img src="screenshots/6.jpg" alt="Title card 2" width="240" /> | <img src="screenshots/7.jpg" alt="More" width="240" /> |
+| | Tadami | Takami |
+|---|---|---|
+| Источники | APK-расширения из репозитория | то же **плюс** источники, созданные в приложении |
+| Новый сайт | написать расширение, собрать APK, опубликовать индекс | вставить ссылку |
+| Починка селектора | правка кода → CI → релиз | кнопка «Проверить снова», профиль сайта обновляется на месте |
+| Знания о сайтах | в APK у всех | у каждого свои, на его телефоне |
+| Проверка качества | отдельный стенд на компьютере | **стенд — само приложение** |
 
-## What Is Different In This Fork
+## 🔗 Как это выглядит для пользователя
 
-- Aurora-focused UI direction with dedicated Home, library, title, and settings polish.
-- Compose-first app shell, with a few intentional legacy View/Fragment bridge surfaces kept where reader, player, auth, or extension compatibility still needs them.
-- Full anime, manga, and novel support in one app.
-- Novel-oriented development, including compatibility work for LNReader-style ecosystems.
-- User-facing Aurora customization toggles for key Home and title-card interactions.
-
-## Features
-
-| Area | Details |
-| --- | --- |
-| Media types | Anime, manga, and novels in one app |
-| Sources and extensions | Separate browsing for anime, manga, and novel sources/extensions |
-| Home and discovery | Aurora Home hub with greeting header, hero card, recent blocks, and media-specific sections |
-| Library and updates | Unified library management, updates, history, tracking, and download queues |
-| Aurora customization | Display settings for Home recent card style, Home action button style, and title-card action button style |
-| Backup and restore | Backup/restore support across media types |
-| Customization | Theme, reader/player behavior, and Aurora-specific visual preferences |
-
-## Build From Source
-
-Prerequisites:
-- JDK 17
-- Android SDK (compile SDK 36)
-- Android Studio (recommended)
-
-Build commands:
-
-```bash
-./gradlew assembleRelease
+```
+Обзор → Расширения → «＋ Добавить по ссылке»
+        ↓
+   https://example-anime.org
+        ↓
+   разбор 3–5 секунд → карточка источника → «Проверить» → готово
 ```
 
-On Windows:
+Дальше источник ведёт себя как обычное расширение: появляется в «Расширениях», ищется,
+фильтруется, отдаёт серии и видео. Разница только в происхождении.
 
-```powershell
-.\gradlew.bat assembleRelease
-```
+## 🧪 Стенд — само приложение
 
-APK output:
-- `app/build/outputs/apk/release/`
+Проверки, которые раньше жили в отдельном инструменте на компьютере, переезжают внутрь:
 
-For local debug builds:
+| Проверка | Что значит «прошла» |
+|---|---|
+| каталог | ≥ 10 карточек, ссылки и постеры непустые |
+| прокрутка | вторая страница отличается от первой |
+| карточка | название, постер, описание, жанры |
+| серии | список непустой, порядок правильный |
+| видео | ссылка действительно отдаёт поток, а не HTML |
+| фильтры | применение фильтра меняет выдачу |
 
-```bash
+Провал — не приговор: приложение пробует альтернативный селектор, другой параметр
+пагинации, POST вместо GET. Что сработало — записывается в профиль сайта.
+
+## 🗺️ Этапы
+
+| Этап | Содержание | Статус |
+|---|---|---|
+| 0 | Форк Tadami, ребренд, оформление репозитория | ✅ сделано |
+| 1 | Спека источника + интерпретатор (каталог, детали, серии, медиа) | 🔄 в работе |
+| 2 | Генератор: детектор движка, сборщик спеки, самопроверка | ⏳ |
+| 3 | `VirtualSourceProvider` + экран «Добавить по ссылке» | ⏳ |
+| 4 | Cookie/WebView-логин, JS-хук, фильтры | ⏳ |
+| 5 | Профили сайтов с весами и откатом при регрессии | ⏳ |
+| 6 | Переименование пакета, релизы | ⏳ |
+
+Подробно — в [docs/takami.md](docs/takami.md).
+
+## 📲 Установка
+
+Сборок Takami пока нет: приложение в разработке. Сейчас ставится апстрим —
+[Tadami Releases](https://github.com/andarcanum/Tadami-Aniyomi-fork/releases).
+
+Когда появятся свои сборки, они будут здесь, в **Releases**, с собственным ключом подписи,
+чтобы обновления не конфликтовали с апстримом.
+
+## 🧱 Сборка из исходников
+
+```sh
+git clone https://github.com/ilyuzorpyramur-glitch/Takami.git
+cd Takami
 ./gradlew assembleDebug
 ```
 
-Google Drive sync uses a local-only OAuth override file at
-`app/src/main/assets/client_secrets.local.json`. Keep the tracked
-`app/src/main/assets/client_secrets.json` file as the placeholder template
-and put real OAuth credentials only in the ignored local file.
+Нужен JDK 17 и Android SDK. Пока приложение собирается под пакетом `com.tadami.aurora` —
+переименование в `com.takami` отдельный этап: менять `applicationId` можно только вместе
+с миграцией библиотеки, иначе у пользователя пропадут история и закладки.
 
-## Module Map
+## ⚖️ Лицензия и происхождение
 
-- `app`: app shell, navigation, screens, activities, and feature wiring
-- `domain`: business logic, use cases, and repository contracts
-- `data`: repository implementations, database handlers, and SQLDelight schemas
-- `core/common`: shared networking, preferences, JS helpers, and utility code
-- `source-api`: extension contracts and source-facing APIs (including the Reels feed contract — see [`FEED_CONTRACT.md`](source-api/FEED_CONTRACT.md))
-- `source-local`: local source implementation details
-- `presentation-core` and `presentation-widget`: shared Compose UI building blocks
-- `i18n` and `i18n-aniyomi`: resource bundles and translations
-- `private-modules`: optional private bridges loaded from local configuration
+- [Apache License 2.0](LICENSE) — как у апстрима.
+- Takami — форк [andarcanum/Tadami-Aniyomi-fork](https://github.com/andarcanum/Tadami-Aniyomi-fork),
+  который, в свою очередь, форк [aniyomiorg/aniyomi](https://github.com/aniyomiorg/aniyomi).
+- Авторство кода принадлежит этим проектам и их контрибьюторам. Моё — генератор,
+  самопроверка и экраны, которых нет в апстриме.
+- Репозиторий синхронизируется с Tadami: их исправления приезжают сюда.
 
-## Reels Feed Plugin Contract
+## 🤝 Связанные проекты
 
-Short-video feed (“Reels”) sources are built against the `AnimeFeedSource`
-contract in `:source-api`. The full author-facing specification — the sticky
-cursor/page-int pagination protocol, `ShortVideoItem` URL semantics, plugin
-API versioning rules, the optional v27 session-continuity capability
-(`AnimeFeedReplaySource`), and a source skeleton — lives in
-**[`source-api/FEED_CONTRACT.md`](source-api/FEED_CONTRACT.md)**
-(current contract version: **27**). Feed plugins declare compatibility via the
-`tachiyomix.extensionLib` manifest metadata; the host accepts **12.0–27.0** and
-rejects plugins outside that range instead of crashing at runtime.
+- [extension-forge](https://github.com/ilyuzorpyramur-glitch/extension-forge) — тот же генератор,
+  но на компьютере: собирает APK-расширения и гоняет их на стенде
+- [aniyomi-ru-anime-repo](https://github.com/ilyuzorpyramur-glitch/aniyomi-ru-anime-repo) —
+  русские аниме-расширения
+- [Tadami](https://github.com/andarcanum/Tadami-Aniyomi-fork) — апстрим, с которого начинается Takami
 
-## Contributing
+---
+<p align="center">Часть экосистемы <a href="https://github.com/ilyuzorpyramur-glitch/extension-forge">extension-forge</a> · аниме · манга · ранобэ</p>
 
-Pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+---
 
-## Disclaimer
+## 🤖 Как я пишу код
 
-Tadami is a **media library manager and player**. Tadami **does not host, store,
-provide, bundle, or distribute** any content, sources, extensions, or
-repositories. The application ships **without** any preinstalled sources or
-repositories.
+<p align="center">
+  <img src=".github/assets/ai-pair-coding.jpg" alt="AI пишет код, я проверяю" width="100%">
+</p>
 
-Any content accessed through Tadami comes from **third-party sources that the
-user chooses to add**. The Tadami project has no control over, and assumes no
-responsibility for, such third-party sources, their content, or their legality.
-Users are solely responsible for ensuring they have the right to access any
-content and for complying with applicable laws.
+Не секрет: код в этих репозиториях я делаю не вручную. Основную работу — разбор
+сайтов, генерацию расширений, починку селекторов и сборку — выполняет AI,
+а я ставлю задачи, проверяю результат и отвечаю за то, что уходит в релиз.
 
-Tadami is **not affiliated with, endorsed by, or sponsored by** any anime, manga,
-or novel rights holder, streaming service, publisher, or studio, nor by Aniyomi,
-Mihon, or Tachiyomi as brands. All product names, logos, and brands are the
-property of their respective owners.
+- AI пишет код и готовит APK, GitHub Actions собирает и подписывает
+- я проверяю источники, тестирую на устройстве и решаю, что публиковать
+- ошибки, регрессии и спорные решения — на мне
 
-Tadami is intended for **lawful use only**. Do not use Tadami to infringe the
-rights of others. See [DISCLAIMER.md](DISCLAIMER.md) for the full statement and
-[DMCA.md](DMCA.md) for our copyright/takedown policy (DMCA inquiries: [jannople7@gmail.com](mailto:jannople7@gmail.com)).
+## ❤️ Поддержать проект
 
-## Credits
+<p align="center">
+  <img src=".github/assets/donate-banner.jpg" alt="Поддержать проект" width="100%">
+</p>
 
-- [Mihon](https://github.com/mihonapp/mihon)
-- [Aniyomi](https://github.com/aniyomiorg/aniyomi)
+Takami бесплатный и без рекламы. Если он экономит твоё время —
+можно отправить донат через Tribute:
 
-## License
+<p align="center">
+  <a href="https://web.tribute.tg/d/T6v"><img src="https://img.shields.io/badge/%D0%9E%D1%82%D0%BA%D1%80%D1%8B%D1%82%D1%8C%20%D0%B2%20%D0%B1%D1%80%D0%B0%D1%83%D0%B7%D0%B5%D1%80%D0%B5-Tribute-ff4d6d?style=for-the-badge&logoColor=white" alt="Поддержать в браузере"></a>
+  <a href="https://t.me/tribute/app?startapp=dT6v"><img src="https://img.shields.io/badge/Telegram-Tribute-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Поддержать в Telegram"></a>
+</p>
 
-Licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+<p align="center"><sub>Спасибо, что пользуешься и поддерживаешь ❤️</sub></p>
