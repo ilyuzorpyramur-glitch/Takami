@@ -4,6 +4,8 @@ import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import kotlinx.coroutines.Dispatchers
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -105,7 +107,13 @@ class SpecEngine(
         val e = spec.episodes
         val numberRegex = Regex(e.numberRegex)
 
-        return doc.select(e.itemSelector)
+        val nodes = doc.select(e.itemSelector)
+        logcat(LogPriority.DEBUG) {
+            "Takami episodes: selector=" + e.itemSelector + " attr=" + e.linkAttr +
+                " nodes=" + nodes.size + " url=" + anime.url
+        }
+
+        return nodes
             .mapNotNull { item ->
                 val link = e.linkSelector
                     ?.let { sel -> item.selectFirst(sel) }

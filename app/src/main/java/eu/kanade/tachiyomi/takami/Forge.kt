@@ -1,6 +1,8 @@
 package eu.kanade.tachiyomi.takami
 
 import kotlinx.coroutines.Dispatchers
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
@@ -104,6 +106,12 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             createdAt = System.currentTimeMillis(),
             updatedAt = System.currentTimeMillis(),
         )
+
+        logcat(LogPriority.DEBUG) {
+            "Takami probe: detail=" + detail + " card=" + chosen.selector +
+                " episodes=" + spec.episodes.itemSelector + " attr=" + spec.episodes.linkAttr +
+                " found=" + bestCount + " iframe=" + hasIframe
+        }
 
         val checks = SelfCheck(engine).run(spec)
         ForgeResult.Built(spec, checks, detail)
