@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
+import eu.kanade.tachiyomi.takami.TakamiForge
 import tachiyomi.domain.source.anime.model.StubAnimeSource
 import tachiyomi.domain.source.anime.repository.AnimeStubSourceRepository
 import tachiyomi.domain.source.anime.service.AnimeSourceManager
@@ -54,6 +55,31 @@ class AndroidAnimeSourceManager(
 
     private val stubSourcesMap = ConcurrentHashMap<Long, StubAnimeSource>()
 
+    // Два провайдера источников: APK-расширения и то, что создано в приложении.
+    // Оба кладут источники в одну карту, поэтому UI не различает их происхождение.
+    private val extensionSources = ConcurrentHashMap<Long, AnimeSource>()
+    private val takamiSources = ConcurrentHashMap<Long, AnimeSource>()
+
+    private fun publishSources() {
+        val merged = ConcurrentHashMap<Long, AnimeSource>()
+        merged.putAll(takamiSources)
+        merged.putAll(extensionSources)
+        merged[LocalAnimeSource.ID] = localSource
+        sourcesMapFlow.value = merged
+        _isInitialized.value = true
+    }
+
+    private val localSource: AnimeSource by lazy {
+        LocalAnimeSource(
+            context,
+            Injekt.get(),
+            Injekt.get(),
+            Injekt.get(),
+            Injekt.get(),
+            Injekt.get(),
+        )
+    }
+
     override val sources: Flow<List<AnimeSource>> = sourcesMapFlow.map {
         it.values.toList()
     }
@@ -63,29 +89,28 @@ class AndroidAnimeSourceManager(
     }
 
     init {
+        TakamiForge.init(context)
+
+        scope.launch {
+            TakamiForge.specs.collectLatest { specs ->
+                takamiSources.clear()
+                TakamiForge.sources().forEach { takamiSources[it.id] = it }
+                publishSources()
+                specs.forEach { registerStubSource(StubAnimeSource(it.sourceId, it.lang, it.name)) }
+            }
+        }
+
         scope.launch {
             extensionManager.installedExtensionsFlow
                 .collectLatest { extensions ->
-                    val mutableMap = ConcurrentHashMap<Long, AnimeSource>(
-                        mapOf(
-                            LocalAnimeSource.ID to LocalAnimeSource(
-                                context,
-                                Injekt.get(),
-                                Injekt.get(),
-                                Injekt.get(),
-                                Injekt.get(),
-                                Injekt.get(),
-                            ),
-                        ),
-                    )
+                    extensionSources.clear()
                     extensions.forEach { extension ->
                         extension.sources.forEach {
-                            mutableMap[it.id] = it
+                            extensionSources[it.id] = it
                             registerStubSource(StubAnimeSource.from(it))
                         }
                     }
-                    sourcesMapFlow.value = mutableMap
-                    _isInitialized.value = true
+                    publishSources()
                 }
         }
 

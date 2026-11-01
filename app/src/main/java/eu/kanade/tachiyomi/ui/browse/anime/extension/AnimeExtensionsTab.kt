@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.AddLink
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -32,6 +33,7 @@ import eu.kanade.presentation.components.TabContent
 import eu.kanade.presentation.more.settings.screen.browse.AnimeExtensionStoreScreen
 import eu.kanade.tachiyomi.extension.anime.model.AnimeExtension
 import eu.kanade.tachiyomi.ui.browse.anime.extension.details.AnimeExtensionDetailsScreen
+import eu.kanade.tachiyomi.ui.takami.TakamiForgeScreen
 import eu.kanade.tachiyomi.ui.webview.WebViewScreen
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import eu.kanade.tachiyomi.util.system.isPackageInstalled
@@ -59,6 +61,11 @@ fun animeExtensionsTab(
         badgeNumber = state.updates.takeIf { it > 0 },
         searchEnabled = true,
         actions = persistentListOf(
+            AppBar.OverflowAction(
+                title = "Добавить по ссылке",
+                icon = Icons.Outlined.AddLink,
+                onClick = { navigator.push(TakamiForgeScreen()) },
+            ),
             AppBar.OverflowAction(
                 title = stringResource(MR.strings.action_filter),
                 icon = Icons.Outlined.FilterList,
