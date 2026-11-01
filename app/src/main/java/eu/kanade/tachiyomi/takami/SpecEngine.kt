@@ -111,11 +111,19 @@ class SpecEngine(
                     ?.let { sel -> item.selectFirst(sel) }
                     ?: item.takeIf { it.tagName() == "a" }
                     ?: item.selectFirst("a[href]")
+                    ?: item.takeIf { it.hasAttr(e.linkAttr) }
                     ?: return@mapNotNull null
-                val href = link.absUrl("href").ifBlank { link.attr("href") }
+
+                val href = when {
+                    e.linkAttr != "href" -> link.attr(e.linkAttr)
+                    else -> link.absUrl("href").ifBlank { link.attr("href") }
+                }
                 if (href.isBlank()) return@mapNotNull null
 
                 val label = item.text().trim().ifBlank { link.text().trim() }
+                // Без явной привязки к сериям берём только похожие подписи:
+                // иначе в список попадают годы, жанры и прочие ссылки с цифрами.
+                if (e.linkAttr == "href" && !EPISODE_HINT.containsMatchIn(label)) return@mapNotNull null
                 val number = numberRegex.find(label)?.groupValues?.last()?.toFloatOrNull()
                     ?: return@mapNotNull null
 
@@ -145,6 +153,12 @@ class SpecEngine(
             MEDIA_URL.findAll(html).forEach { match ->
                 val url = normalizeMedia(match.value)
                 if (url.isNotBlank()) links.putIfAbsent(url, qualityOf(url))
+            }
+            // playerjs и родственные: адрес, затем метка — «...mp4,[360p]».
+            REVERSED.findAll(html).forEach { match ->
+                val url = normalizeMedia(match.groupValues[1])
+                val label = match.groupValues[2].trim()
+                if (url.isNotBlank() && label.isNotBlank()) links.putIfAbsent(url, label)
             }
             // Часть плееров кладёт адрес в атрибут, а не в текст скрипта.
             val doc = Jsoup.parse(html)
@@ -284,6 +298,12 @@ class SpecEngine(
             """(?:https?:)?//[^\s"'<>]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"'<>]*)?""",
         )
         private val QUALITY = Regex("""[_/](\d{3,4})[_.]""")
+
+        private val EPISODE_HINT = Regex("""(?i)(серия|эпизод|episode|series\s*\d)""")
+
+        private val REVERSED = Regex(
+            """((?:https?:)?//[^\s"'<>,\[\]]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"'<>,\[\]]*)?)\s*,\s*\[([^\]]{1,12})]""",
+        )
         private val PAGE_NUMBER = Regex("""(?:page[/=])(\d+)""")
     }
 }

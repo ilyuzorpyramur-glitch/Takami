@@ -81,6 +81,8 @@ data class EpisodesSpec(
     val itemSelector: String = "a[href]",
     /** Ссылка серии внутри блока; null — сама карточка. */
     val linkSelector: String? = null,
+    /** Имя атрибута с адресом: href, data-iframe, data-src… */
+    val linkAttr: String = "href",
     /** Номер серии из текста. */
     val numberRegex: String = "(\\d+)",
     /** Подпись берём из текста; если пусто — «Серия N». */

@@ -77,6 +77,7 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             episodes = EpisodesSpec(
                 itemSelector = episodes.selector,
                 linkSelector = episodes.linkSelector,
+                linkAttr = episodes.linkAttr,
                 numberRegex = "(\\d{1,4})",
             ),
             video = VideoSpec(
@@ -218,6 +219,16 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
     }
 
     private fun pickEpisodes(doc: Document): EpisodeChoice {
+        // Плееры вроде «табов озвучки» держат адрес серии в атрибуте, а не в href.
+        for (attr in EPISODE_ATTRS) {
+            val nodes = doc.select("[" + attr + "]").filter { EPISODE_TEXT.containsMatchIn(it.text().trim()) }
+            if (nodes.size < 1) continue
+            val node = nodes.first()
+            val selector = selectorOf(node) ?: continue
+            if (doc.select(selector).size < nodes.size) continue
+            return EpisodeChoice(selector, null, attr)
+        }
+
         val numbered = doc.select("a[href]").filter { link ->
             EPISODE_TEXT.containsMatchIn(link.text().trim())
         }
@@ -225,11 +236,11 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             val parent = numbered.first().parent() ?: return EpisodeChoice("a[href]", null)
             val parentSelector = selectorOf(parent)
             if (parentSelector != null && doc.select(parentSelector).size >= 2) {
-                return EpisodeChoice(parentSelector, "a[href]")
+                return EpisodeChoice(parentSelector, "a[href]", "href")
             }
-            return EpisodeChoice("a[href]", null)
+            return EpisodeChoice("a[href]", null, "href")
         }
-        return EpisodeChoice("a[href]", null)
+        return EpisodeChoice("a[href]", null, "href")
     }
 
     private fun selectorOf(element: Element): String? {
@@ -257,7 +268,11 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         val posterSelector: String?,
     )
 
-    private data class EpisodeChoice(val selector: String, val linkSelector: String?)
+    private data class EpisodeChoice(
+        val selector: String,
+        val linkSelector: String?,
+        val linkAttr: String = "href",
+    )
 
     companion object {
         private const val MIN_CARDS = 6
@@ -280,6 +295,8 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         )
 
         private val EPISODE_TEXT = Regex("""(?i)(серия|эпизод|episode\s*\d)""")
+
+        private val EPISODE_ATTRS = listOf("data-iframe", "data-src", "data-player", "data-video")
         private val PAGE_QUERY = Regex("""[?&]page=\d""")
     }
 }
