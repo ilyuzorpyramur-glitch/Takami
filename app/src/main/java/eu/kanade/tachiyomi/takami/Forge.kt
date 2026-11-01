@@ -155,7 +155,7 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             ?.let { return it }
 
         doc.selectFirst("meta[property=og:image]")
-            ?.attr("content")
+            ?.let { it.absUrl("content").ifBlank { it.attr("content") } }
             ?.takeIf { it.isNotBlank() }
             ?.let { return it }
 

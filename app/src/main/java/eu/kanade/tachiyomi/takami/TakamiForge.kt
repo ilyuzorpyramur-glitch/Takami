@@ -155,7 +155,9 @@ object TakamiForge {
         val spec = _specs.value.firstOrNull { it.sourceId == sourceId } ?: return null
         val local = spec.iconPath?.let { java.io.File(it) }
         if (local != null && local.exists()) return local
-        return spec.iconUrl?.takeIf { it.isNotBlank() }
+        val url = spec.iconUrl?.takeIf { it.isNotBlank() } ?: return null
+        // Относительный адрес из og:image достраиваем до полного.
+        return if (url.startsWith("/")) spec.baseUrl.trimEnd('/') + url else url
     }
 
     fun source(host: String): VirtualAnimeSource? = _specs.value
