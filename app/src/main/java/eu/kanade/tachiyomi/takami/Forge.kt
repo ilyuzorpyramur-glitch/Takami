@@ -236,8 +236,10 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
     )
 
     private fun countEpisodes(doc: Document, choice: EpisodeChoice): Int {
-        if (choice.linkAttr != "href") return doc.select(choice.selector).count { EPISODE_TEXT.containsMatchIn(it.text()) }
-        return doc.select(choice.selector).size
+        return doc.select(choice.selector).count { node ->
+            val text = node.text().trim()
+            EPISODE_TEXT.containsMatchIn(text) && NUMBER.containsMatchIn(text)
+        }
     }
 
     private fun pickDetailPage(doc: Document, baseUrl: String, card: CardChoice): String? {
@@ -251,8 +253,13 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
     private fun pickEpisodes(doc: Document): EpisodeChoice {
         // Плееры вроде «табов озвучки» держат адрес серии в атрибуте, а не в href.
         for (attr in EPISODE_ATTRS) {
-            val nodes = doc.select("[" + attr + "]").filter { EPISODE_TEXT.containsMatchIn(it.text().trim()) }
-            if (nodes.size < 1) continue
+            val nodes = doc.select("[" + attr + "]").filter { node ->
+                val text = node.text().trim()
+                EPISODE_TEXT.containsMatchIn(text) ||
+                    PLAYER_CLASS.containsMatchIn(node.className()) ||
+                    PLAYER_CLASS.containsMatchIn(node.parent()?.className().orEmpty())
+            }
+            if (nodes.isEmpty()) continue
             val node = nodes.first()
             val selector = selectorOf(node) ?: continue
             if (doc.select(selector).size < nodes.size) continue
@@ -328,6 +335,10 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         private val EPISODE_TEXT = Regex("""(?i)(серия|эпизод|episode\s*\d)""")
 
         private val EPISODE_ATTRS = listOf("data-iframe", "data-src", "data-player", "data-video")
+
+        private val PLAYER_CLASS = Regex("""(?i)(series|episode|seria|player)""")
+
+        private val NUMBER = Regex("""\d{1,4}""")
         private val PAGE_QUERY = Regex("""[?&]page=\d""")
     }
 }
