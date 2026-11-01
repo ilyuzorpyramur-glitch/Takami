@@ -139,12 +139,19 @@ class SpecEngine(
         fun collect(html: String) {
             labelled.findAll(html).forEach { match ->
                 val label = match.groupValues[1].trim()
-                val url = match.groupValues[2].replace("&amp;", "&")
-                links.putIfAbsent(url, label)
+                val url = normalizeMedia(match.groupValues[2])
+                if (url.isNotBlank()) links.putIfAbsent(url, label)
             }
             MEDIA_URL.findAll(html).forEach { match ->
-                val url = match.value.replace("&amp;", "&").trimEnd(',', '"', '\'')
-                links.putIfAbsent(url, qualityOf(url))
+                val url = normalizeMedia(match.value)
+                if (url.isNotBlank()) links.putIfAbsent(url, qualityOf(url))
+            }
+            // Часть плееров кладёт адрес в атрибут, а не в текст скрипта.
+            val doc = Jsoup.parse(html)
+            doc.select("video[src], source[src], video[data-src], source[data-src]").forEach { node ->
+                val raw = node.attr("src").ifBlank { node.attr("data-src") }
+                val url = normalizeMedia(raw)
+                if (url.isNotBlank()) links.putIfAbsent(url, qualityOf(url))
             }
         }
 
@@ -168,6 +175,16 @@ class SpecEngine(
 
         return links.map { (url, label) ->
             Video(url, label.ifBlank { qualityOf(url) }, url)
+        }
+    }
+
+    /** Протокол-относительные адреса плееров и разметки приводим к https. */
+    private fun normalizeMedia(raw: String): String {
+        val url = raw.replace("&amp;", "&").trim().trimEnd(',', '"', '\'')
+        return when {
+            url.startsWith("//") -> "https:" + url
+            url.startsWith("http://") || url.startsWith("https://") -> url
+            else -> ""
         }
     }
 
@@ -263,7 +280,9 @@ class SpecEngine(
                 .build()
         }
 
-        private val MEDIA_URL = Regex("""https?://[^\s"'<>]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"'<>]*)?""")
+        private val MEDIA_URL = Regex(
+            """(?:https?:)?//[^\s"'<>]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"'<>]*)?""",
+        )
         private val QUALITY = Regex("""[_/](\d{3,4})[_.]""")
         private val PAGE_NUMBER = Regex("""(?:page[/=])(\d+)""")
     }
