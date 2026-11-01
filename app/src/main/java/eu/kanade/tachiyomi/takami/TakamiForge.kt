@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.takami
 
 import android.content.Context
+import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.animesource.AnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
@@ -14,6 +15,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import logcat.LogPriority
@@ -118,6 +121,9 @@ object TakamiForge {
         val next = _specs.value.filterNot { it.host == updated.host } + updated
         _specs.value = next
         write(next)
+        // Список источников фильтруется по включённым языкам: без этого шага
+        // добавленный источник просто не появится в «Источниках».
+        enableLanguage(updated.lang)
         updated
     }
 
@@ -125,6 +131,17 @@ object TakamiForge {
         val next = _specs.value.filterNot { it.host == host }
         _specs.value = next
         write(next)
+    }
+
+    private fun enableLanguage(lang: String) {
+        if (lang.isBlank()) return
+        runCatching {
+            val preferences = Injekt.get<SourcePreferences>()
+            val current = preferences.enabledLanguages().get()
+            if (lang !in current) {
+                preferences.enabledLanguages().set(current + lang)
+            }
+        }.onFailure { logcat(LogPriority.ERROR, it) { "Takami: не включил язык " + lang } }
     }
 
     /** Стабильный id: хост не меняется — не меняется и источник в библиотеке. */
