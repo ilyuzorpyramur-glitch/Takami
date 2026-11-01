@@ -150,7 +150,7 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             val withPoster = items.count { it.selectFirst("img") != null }
             if (withPoster < usable / 2) continue
 
-            val titleSelector = if (items.first().selectFirst("h3 a") != null) "h3" else null
+            val titleSelector = if (items.firstOrNull()?.selectFirst("h3 a") != null) "h3" else null
             return CardChoice(selector, "a[href]", titleSelector, "img")
         }
         return null
