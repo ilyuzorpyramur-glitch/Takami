@@ -5,6 +5,7 @@ import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.animesource.AnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
@@ -64,7 +65,39 @@ class VirtualAnimeSource(
 
     override suspend fun getSeasonList(anime: SAnime): List<SAnime> = emptyList()
 
-    override suspend fun getVideoList(episode: SEpisode): List<Video> = engine.videos(spec, episode)
+    // Плеер в этом приложении спрашивает не видео напрямую, а хостеры.
+    // Отдаём один хостер — сам сайт — с уже разрешённым списком видео.
+    override suspend fun getHosterList(episode: SEpisode): List<Hoster> {
+        val videos = videos(episode)
+        if (videos.isEmpty()) return emptyList()
+        return listOf(
+            Hoster(
+                hosterUrl = episode.url,
+                hosterName = HOSTER_NAME,
+                videoList = videos,
+            ),
+        )
+    }
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> {
+        hoster.videoList?.let { return it }
+        return videos(SEpisode.create().apply { url = hoster.hosterUrl })
+    }
+
+    private val videosByEpisode = java.util.concurrent.ConcurrentHashMap<String, List<Video>>()
+
+    private suspend fun videos(episode: SEpisode): List<Video> {
+        videosByEpisode[episode.url]?.let { return it }
+        val resolved = engine.videos(spec, episode)
+        if (resolved.isNotEmpty()) videosByEpisode[episode.url] = resolved
+        return resolved
+    }
+
+    override suspend fun getVideoList(episode: SEpisode): List<Video> = videos(episode)
+
+    private companion object {
+        private const val HOSTER_NAME = "Плеер сайта"
+    }
 
     // Устаревший Rx-путь: приложение ходит через корутины, но интерфейс требует реализацию.
     @Deprecated("Use getPopularAnime")
