@@ -95,6 +95,9 @@ class AndroidAnimeSourceManager(
             TakamiForge.specs.collectLatest { specs ->
                 takamiSources.clear()
                 TakamiForge.sources().forEach { takamiSources[it.id] = it }
+                logcat(LogPriority.DEBUG) {
+                    "Takami: зарегистрировано " + takamiSources.size + " из " + specs.size
+                }
                 publishSources()
                 specs.forEach { registerStubSource(StubAnimeSource(it.sourceId, it.lang, it.name)) }
             }

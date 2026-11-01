@@ -135,10 +135,15 @@ object TakamiForge {
     val specs: StateFlow<List<SiteSpec>> = _specs.asStateFlow()
 
     fun init(context: Context) {
-        if (dir != null) return
         val target = File(context.filesDir, DIR).apply { mkdirs() }
+        val first = dir == null
         dir = target
-        _specs.value = read(target)
+        val loaded = read(target)
+        // Перечитываем при каждом старте: файл мог появиться после первого вызова.
+        if (first || loaded.size != _specs.value.size) {
+            logcat(LogPriority.DEBUG) { "Takami: источников на устройстве — " + loaded.size }
+            _specs.value = loaded
+        }
     }
 
     val engine: SpecEngine by lazy { SpecEngine() }
