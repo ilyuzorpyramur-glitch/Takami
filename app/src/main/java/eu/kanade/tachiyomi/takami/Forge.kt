@@ -24,13 +24,29 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         val html = engine.fetch(url)
         val doc = Jsoup.parse(html, url)
         val detected = detectEngine(html)
-        val card = pickCardSelector(doc) ?: return@withContext ForgeResult.Failure(
-            "Не нашёл карточки тайтлов на главной: сайт отдаёт разметку, которую я пока не разбираю",
+        val candidates = reachableCards(doc)
+        var card: CardChoice? = null
+        var sample: List<eu.kanade.tachiyomi.animesource.model.SAnime> = emptyList()
+
+        for (candidate in candidates) {
+            val probe = draftSpec(baseUrl, host, candidate, pathOf(url), detected)
+            val parsed = runCatching { engine.parseCatalogue(probe, html, url) }.getOrNull() ?: continue
+            val good = parsed.first.count { !it.thumbnail_url.isNullOrBlank() }
+            if (parsed.first.size >= MIN_CARDS && good >= MIN_CARDS / 2) {
+                card = candidate
+                sample = parsed.first
+                break
+            }
+        }
+
+        val chosen = card ?: return@withContext ForgeResult.Failure(
+            "Не нашёл карточки тайтлов на главной: сайт отдаёт разметку, которую я пока не разбираю " +
+                "(проверил " + candidates.size + " вариантов)",
         )
 
         val title = siteName(doc, host)
         val pagination = paginationFor(detected, doc)
-        val detail = pickDetailPage(doc, url, card) ?: url
+        val detail = sample.firstOrNull()?.url ?: pickDetailPage(doc, url, chosen) ?: url
         val detailHtml = if (detail == url) html else runCatching { engine.fetch(detail) }.getOrDefault("")
         val detailDoc = Jsoup.parse(detailHtml, detail)
 
@@ -45,10 +61,10 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             iconUrl = iconOf(doc, url),
             catalog = CatalogSpec(
                 path = pathOf(url),
-                itemSelector = card.selector,
-                linkSelector = card.linkSelector,
-                titleSelector = card.titleSelector,
-                posterSelector = card.posterSelector,
+                itemSelector = chosen.selector,
+                linkSelector = chosen.linkSelector,
+                titleSelector = chosen.titleSelector,
+                posterSelector = chosen.posterSelector,
                 pagination = pagination,
                 search = searchFor(detected),
             ),
@@ -131,30 +147,67 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
     }
 
     /**
-     * Выбор карточки каталога: перебираем типовые контейнеры и оставляем тот,
-     * где больше всего ссылок с постерами. Пустой результат — честный отказ,
+     * Выбор карточки каталога: типовые контейнеры плюс догадка по повторяющимся блокам.
+     *
+     * Каждый вариант проверяется разбором живой страницы: берём первый, где набирается
+     * достаточно тайтлов с заголовком и постером. Пустой результат — честный отказ,
      * а не пустой источник.
      */
-    private fun pickCardSelector(doc: Document): CardChoice? {
-        for (selector in CARD_CANDIDATES) {
-            val items = doc.select(selector)
-            if (items.size < MIN_CARDS) continue
+    private fun reachableCards(doc: Document): List<CardChoice> {
+        val result = mutableListOf<CardChoice>()
 
-            val usable = items.count { item ->
-                val link = item.selectFirst("a[href]") ?: return@count false
-                val href = link.attr("href")
-                href.length > 3 && !href.startsWith("#") && link.text().trim().length > 1
+        CARD_CANDIDATES.mapTo(result) { CardChoice(it, "a[href]", null, "img") }
+
+        val groups = linkedMapOf<String, MutableList<Element>>()
+        for (anchor in doc.select("a[href]")) {
+            val href = anchor.attr("href")
+            if (href.length < 3 || href.startsWith("#")) continue
+            val parent = anchor.parent() ?: continue
+            for (node in listOfNotNull(parent, parent.parent())) {
+                groups.getOrPut(signatureOf(node) ?: continue) { mutableListOf() }.add(anchor)
             }
-            if (usable < MIN_CARDS) continue
-
-            val withPoster = items.count { it.selectFirst("img") != null }
-            if (withPoster < usable / 2) continue
-
-            val titleSelector = if (items.firstOrNull()?.selectFirst("h3 a") != null) "h3" else null
-            return CardChoice(selector, "a[href]", titleSelector, "img")
         }
-        return null
+
+        groups.entries
+            .filter { it.value.size >= MIN_CARDS }
+            .sortedByDescending { entry -> entry.value.count { it.selectFirst("img") != null } }
+            .take(MAX_GUESSES)
+            .mapTo(result) { entry -> CardChoice(entry.key, "a[href]", null, "img") }
+
+        return result.distinctBy { it.selector }
     }
+
+    private fun signatureOf(node: Element): String? {
+        val tag = node.tagName()
+        if (tag in SKIP_TAGS) return null
+        val cls = node.className().trim().split(" ").firstOrNull { it.isNotBlank() }
+        return when {
+            cls != null -> tag + "." + cls
+            node.id().isNotBlank() -> tag + "#" + node.id()
+            tag in setOf("ul", "ol", "div", "table", "section") -> tag
+            else -> null
+        }
+    }
+
+    private fun draftSpec(
+        baseUrl: String,
+        host: String,
+        card: CardChoice,
+        path: String,
+        engineName: String,
+    ): SiteSpec = SiteSpec(
+        host = host,
+        baseUrl = baseUrl,
+        name = host,
+        engine = engineName,
+        catalog = CatalogSpec(
+            path = path,
+            itemSelector = card.selector,
+            linkSelector = card.linkSelector,
+            titleSelector = card.titleSelector,
+            posterSelector = card.posterSelector,
+        ),
+    )
 
     private fun pickDetailPage(doc: Document, baseUrl: String, card: CardChoice): String? {
         val first = doc.select(card.selector).firstOrNull() ?: return null
@@ -208,6 +261,9 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
 
     companion object {
         private const val MIN_CARDS = 6
+        private const val MAX_GUESSES = 12
+
+        private val SKIP_TAGS = setOf("html", "body", "head", "script", "style", "nav", "footer")
 
         private val CARD_CANDIDATES = listOf(
             "article",
