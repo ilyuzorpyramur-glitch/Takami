@@ -180,7 +180,7 @@ private fun ForgeContent(
                     Text(
                         when {
                             ready == null -> "Источник по ссылке"
-                            else -> "Шаг " + (step + 1) + " из " + STEPS
+                            else -> "Шаг " + step + " из " + STEPS
                         },
                     )
                 },
@@ -208,6 +208,12 @@ private fun ForgeContent(
                     2 -> PreviewStep(ready)
                     3 -> QualityStep(ready, quality, onQuality)
                     else -> DubbingStep(ready, dubbings, onDubbing, onSave)
+                }
+
+                if (step in 1..3) {
+                    Button(onClick = { onStep(step + 1) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Далее")
+                    }
                 }
             }
 
