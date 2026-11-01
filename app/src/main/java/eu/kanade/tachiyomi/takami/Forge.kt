@@ -169,7 +169,7 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             EPISODE_TEXT.containsMatchIn(link.text().trim())
         }
         if (numbered.isNotEmpty()) {
-            val parent = numbered.first().parent()
+            val parent = numbered.first().parent() ?: return EpisodeChoice("a[href]", null)
             val parentSelector = selectorOf(parent)
             if (parentSelector != null && doc.select(parentSelector).size >= 2) {
                 return EpisodeChoice(parentSelector, "a[href]")

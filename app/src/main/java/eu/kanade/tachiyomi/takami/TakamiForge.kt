@@ -12,12 +12,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import java.io.File
+import rx.Observable
 import java.util.zip.CRC32
 
 /**
@@ -60,6 +62,19 @@ class VirtualAnimeSource(
     override suspend fun getSeasonList(anime: SAnime): List<SAnime> = emptyList()
 
     override suspend fun getVideoList(episode: SEpisode): List<Video> = engine.videos(spec, episode)
+
+    // Устаревший Rx-путь: приложение ходит через корутины, но интерфейс требует реализацию.
+    @Deprecated("Use getPopularAnime")
+    override fun fetchPopularAnime(page: Int): Observable<AnimesPage> =
+        Observable.fromCallable { runBlocking { getPopularAnime(page) } }
+
+    @Deprecated("Use getLatestUpdates")
+    override fun fetchLatestUpdates(page: Int): Observable<AnimesPage> =
+        Observable.fromCallable { runBlocking { getLatestUpdates(page) } }
+
+    @Deprecated("Use getSearchAnime")
+    override fun fetchSearchAnime(page: Int, query: String, filters: AnimeFilterList): Observable<AnimesPage> =
+        Observable.fromCallable { runBlocking { getSearchAnime(page, query, filters) } }
 }
 
 /**
