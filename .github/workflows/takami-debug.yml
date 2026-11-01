@@ -3,10 +3,8 @@ name: Takami debug APK
 on:
   push:
     paths:
-      - "app/src/main/java/eu/kanade/tachiyomi/takami/**"
-      - "app/src/main/java/eu/kanade/tachiyomi/ui/takami/**"
-      - "app/src/main/java/eu/kanade/tachiyomi/source/anime/**"
-      - "app/src/main/java/eu/kanade/tachiyomi/ui/browse/anime/extension/AnimeExtensionsTab.kt"
+      - "app/src/main/**"
+      - "i18n/src/**"
       - ".github/workflows/takami-debug.yml"
   workflow_dispatch:
 
