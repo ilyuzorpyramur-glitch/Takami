@@ -1,6 +1,8 @@
 package eu.kanade.tachiyomi.takami.fetch
 
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
@@ -154,8 +156,8 @@ class FetcherTest {
 
         val fetcher = fetcher()
         val url = server.url("/catalog").toString()
-        val first = kotlinx.coroutines.async(kotlinx.coroutines.Dispatchers.Default) { fetcher.get(url) }
-        val second = kotlinx.coroutines.async(kotlinx.coroutines.Dispatchers.Default) { fetcher.get(url) }
+        val first = async(Dispatchers.Default) { fetcher.get(url) }
+        val second = async(Dispatchers.Default) { fetcher.get(url) }
 
         first.await() shouldBe "<html>раз</html>"
         second.await() shouldBe "<html>раз</html>"
