@@ -42,7 +42,7 @@ class RetryAfterTest {
                     first = false
                     MockResponse().setResponseCode(429).setHeader("Retry-After", "3")
                 } else {
-                    MockResponse().setBody("ok")
+                    MockResponse().setBody("<html>ok</html>")
                 }
             }
         }

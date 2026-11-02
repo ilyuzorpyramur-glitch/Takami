@@ -27,7 +27,7 @@ class RequestBudgetTest {
     fun setUp() {
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = MockResponse().setBody("ok")
+            override fun dispatch(request: RecordedRequest): MockResponse = MockResponse().setBody("<html>ok</html>")
         }
         server.start()
     }

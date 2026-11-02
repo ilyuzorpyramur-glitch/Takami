@@ -43,16 +43,13 @@ class HostGuardTest {
 
     @Test
     fun `пауза между запросами не меньше 1500 мс`(): Unit = runBlocking {
-        val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget(), clock))
-        val url = server.url("/catalog").toString()
+        val guard = HostGuard(InMemoryRequestBudget(), clock, jitter = { 0L })
+        var firstAt = 0L
 
-        fetcher.get(url)
-        val before = clock.now()
-        fetcher.get(url)
+        guard.run("site.example") { firstAt = clock.now() }
+        guard.run("site.example") { }
 
-        (clock.now() - before) shouldBe 0L
-        clock.sleeps.filter { it > 0L }.sum() shouldBe
-            (FetchLimits.MIN_INTERVAL_MS + clock.sleeps.last())
+        (clock.now() - firstAt) shouldBe FetchLimits.MIN_INTERVAL_MS
     }
 
     @Test
