@@ -13,15 +13,15 @@ import org.junit.jupiter.api.Test
 import java.util.Collections
 import kotlin.test.assertFailsWith
 
+/** Ответ 429: пауза из заголовка Retry-After уважается следующим запросом. */
 class RetryAfterTest {
     private lateinit var server: MockWebServer
+    private lateinit var clock: FakeFetchClock
     private val arrivals = Collections.synchronizedList(mutableListOf<Long>())
-
-    @Volatile
-    private var first = true
 
     @BeforeEach
     fun setUp() {
+        clock = FakeFetchClock()
         server = MockWebServer()
         server.start()
     }
@@ -32,21 +32,19 @@ class RetryAfterTest {
     }
 
     @Test
-    fun `ответ 429 задаёт Retry-After, следующий запрос ждёт`(): Unit = runBlocking {
-        val clock = FakeFetchClock()
+    fun `ответ 429 задаёт Retry-After, следующий ждёт`(): Unit = runBlocking {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 arrivals += clock.now()
-                return if (first) {
-                    first = false
+                return if (arrivals.size == 1) {
                     MockResponse().setResponseCode(429).setHeader("Retry-After", "3")
                 } else {
                     MockResponse().setBody("<html>ok</html>")
                 }
             }
         }
-
-        val fetcher = Fetcher(Fetcher.buildClient(), HostGuard(InMemoryRequestBudget(), clock))
+        val guard = HostGuard(InMemoryRequestBudget(), clock)
+        val fetcher = Fetcher(Fetcher.buildClient(), guard)
         val url = server.url("/catalog").toString()
 
         val error = assertFailsWith<HttpStatusError> { fetcher.get(url) }
@@ -61,12 +59,12 @@ class RetryAfterTest {
 
     @Test
     fun `429 без Retry-After даёт паузу по умолчанию`(): Unit = runBlocking {
-        val clock = FakeFetchClock()
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = MockResponse().setResponseCode(429)
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                MockResponse().setResponseCode(429)
         }
-
-        val fetcher = Fetcher(Fetcher.buildClient(), HostGuard(InMemoryRequestBudget(), clock))
+        val guard = HostGuard(InMemoryRequestBudget(), clock)
+        val fetcher = Fetcher(Fetcher.buildClient(), guard)
         val error = assertFailsWith<HttpStatusError> { fetcher.get(server.url("/x").toString()) }
 
         error.retryAfterMs shouldBe FetchLimits.DEFAULT_RETRY_AFTER_MS
