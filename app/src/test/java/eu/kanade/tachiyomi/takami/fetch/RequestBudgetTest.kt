@@ -51,7 +51,7 @@ class RequestBudgetTest {
     }
 
     @Test
-    fun `счётчик ведётся по домену, а не по адресу страницы`(): Unit = runBlocking {
+    fun `счётчик ведётся по домену`(): Unit = runBlocking {
         val store = budget()
         val fetcher = Fetcher(OkHttpClient(), HostGuard(store, FakeFetchClock()))
 

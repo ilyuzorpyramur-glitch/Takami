@@ -35,7 +35,7 @@ class HostGuardTest {
     }
 
     @Test
-    fun `два запроса к одному домену идут с интервалом не меньше 1500 мс`(): Unit = runBlocking {
+    fun `два запроса к домену идут с паузой 1500 мс`(): Unit = runBlocking {
         val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget()))
         val url = server.url("/catalog").toString()
 
@@ -43,7 +43,8 @@ class HostGuardTest {
         fetcher.get(url)
 
         arrivals.size shouldBe 2
-        // Допуск 10 мс: у часов миллисекундное округление, сам лимит — 1500 мс.
+        // Допуск 10 мс: у часов миллисекундное округление, сам лимит —
+        // 1500 мс.
         (arrivals[1] - arrivals[0]) shouldBeGreaterThanOrEqual 1_490L
     }
 

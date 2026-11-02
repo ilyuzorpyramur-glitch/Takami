@@ -3,7 +3,8 @@ package eu.kanade.tachiyomi.takami.fetch
 /**
  * Виртуальные часы: ожидания лимитов не занимают реальное время.
  *
- * sleep сдвигает время вперёд, поэтому тест проверяет не «сколько ждали», а «когда пошли».
+  * sleep сдвигает время вперёд, поэтому тест проверяет не «сколько
+  * ждали», а «когда пошли».
  */
 class FakeFetchClock(start: Long = 1_700_000_000_000L) : FetchClock {
     val sleeps = mutableListOf<Long>()

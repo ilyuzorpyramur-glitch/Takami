@@ -5,7 +5,8 @@ import java.io.IOException
 /**
  * Ошибка сети или ответа сайта.
  *
- * Тексты попадают на экран «Диагностика», поэтому они короткие и без адресов с параметрами:
+  * Тексты попадают на экран «Диагностика», поэтому они короткие и
+  * без адресов с параметрами:
  * в query string у плееров встречаются подписанные ссылки.
  */
 sealed class FetchError(message: String, cause: Throwable? = null) : IOException(message, cause)
@@ -17,11 +18,16 @@ class HttpStatusError(
     val retryAfterMs: Long? = null,
 ) : FetchError("HTTP " + code + " " + url)
 
-/** Дневной потолок запросов к домену исчерпан: до полуночи работаем только из кэша. */
+/**
+ * Дневной потолок запросов к домену исчерпан: до полуночи
+ * работаем только из кэша.
+ */
 class DailyLimitReached(
     val host: String,
     val limit: Int,
-) : FetchError("Дневной лимит запросов к " + host + " исчерпан: " + limit + " за сутки")
+) : FetchError(
+    "Дневной лимит запросов к " + host + " исчерпан: " + limit + " за сутки",
+)
 
 /** Сеть недоступна или соединение оборвалось. */
 class NetworkError(

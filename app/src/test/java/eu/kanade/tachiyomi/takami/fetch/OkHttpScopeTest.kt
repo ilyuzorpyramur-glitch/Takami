@@ -8,7 +8,8 @@ import kotlin.test.fail
 /**
  * OkHttpClient живёт только в пакете fetch.
  *
- * Если клиент появится в парсере или в UI, лимиты домена можно будет обойти одной строкой —
+  * Если клиент появится в парсере или в UI, лимиты домена можно
+  * будет обойти одной строкой —
  * этот тест такого не пропустит.
  */
 class OkHttpScopeTest {
@@ -18,7 +19,8 @@ class OkHttpScopeTest {
         val root = listOf(
             File("src/main/java/eu/kanade/tachiyomi/takami"),
             File("app/src/main/java/eu/kanade/tachiyomi/takami"),
-        ).firstOrNull { it.isDirectory } ?: fail("Не нашёл каталог takami: проверьте рабочую папку тестов")
+        ).firstOrNull { it.isDirectory }
+            ?: fail("Не нашёл каталог takami в рабочей папке тестов")
 
         val leaked = root.walkTopDown()
             .filter { it.isFile && it.extension == "kt" }

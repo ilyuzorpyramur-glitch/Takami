@@ -3,7 +3,10 @@ package eu.kanade.tachiyomi.takami.fetch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Счётчик для тестов: та же семантика, что у файловой версии, но без диска. */
+/**
+ * Счётчик для тестов: та же семантика, что у файловой версии, но
+ * без диска.
+ */
 class InMemoryRequestBudget(
     private val limit: Int = FetchLimits.DAILY_PER_HOST,
 ) : RequestBudget {

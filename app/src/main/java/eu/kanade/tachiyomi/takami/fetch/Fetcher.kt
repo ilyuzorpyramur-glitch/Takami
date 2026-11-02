@@ -23,7 +23,10 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-/** Краткий ответ на HEAD: код, итоговый адрес и заголовки. Тела здесь нет. */
+/**
+ * Краткий ответ на HEAD: код, итоговый адрес и заголовки. Тела здесь
+ * нет.
+ */
 data class ResponseInfo(
     val code: Int,
     val url: String,
@@ -38,8 +41,10 @@ data class ResponseInfo(
 /**
  * Единственная точка HTTP для виртуальных источников.
  *
- * Наружу не отдаёт [OkHttpClient]: иначе лимиты, повторы и кэш можно было бы обойти,
- * создав свой клиент. Внутри — пул соединений, gzip, HTTP/2, cookie-jar и таймауты 20/20 с.
+  * Наружу не отдаёт [OkHttpClient]: иначе лимиты, повторы и кэш можно было
+  * бы обойти,
+  * создав свой клиент. Внутри — пул соединений, gzip, HTTP/2, cookie-jar и
+  * таймауты 20/20 с.
  */
 class Fetcher internal constructor(
     private val client: OkHttpClient,
@@ -57,7 +62,8 @@ class Fetcher internal constructor(
         call(request(url, referer).post(body.toRequestBody(htmlMediaType)).build(), readBody = true).body
 
     /**
-     * Первые байты медиа: проверяем, что ссылка отдаёт поток, а не страницу.
+      * Первые байты медиа: проверяем, что ссылка отдаёт поток, а не
+      * страницу.
      * Трафик минимальный — Range 0..256.
      */
     suspend fun probe(url: String, referer: String? = null): String =
@@ -119,7 +125,10 @@ class Fetcher internal constructor(
         val headers: Headers,
     )
 
-    /** Cookies держим в памяти: сайтам с сессией это нужно, на диск ничего не пишем. */
+    /**
+     * Cookies держим в памяти: сайтам с сессией это нужно, на диск
+     * ничего не пишем.
+     */
     private class InMemoryCookieJar : CookieJar {
         private val jar = ConcurrentHashMap<String, List<Cookie>>()
 
@@ -155,7 +164,10 @@ class Fetcher internal constructor(
         @Volatile
         private var instance: Fetcher? = null
 
-        /** Готовит общий сетевой слой. Вызывается при инициализации реестра источников. */
+        /**
+         * Готовит общий сетевой слой. Вызывается при инициализации
+         * реестра источников.
+         */
         fun init(context: Context, budget: RequestBudget? = null) {
             if (instance != null) return
             synchronized(this) {
@@ -166,7 +178,7 @@ class Fetcher internal constructor(
         }
 
         fun get(): Fetcher = instance
-            ?: throw IllegalStateException("Fetcher не инициализирован: вызовите Fetcher.init(context)")
+            ?: throw IllegalStateException("Нет Fetcher: вызовите Fetcher.init(context)")
 
         private fun buildClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
