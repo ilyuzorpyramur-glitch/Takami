@@ -145,7 +145,8 @@ class HttpCacheTest {
 
         repeat(6) { index ->
             val key = store.key("https://site.example/" + index, null)
-            store.store(key, CacheEntry(url = "https://site.example/" + index), html("страница " + index))
+            val body = html("страница " + index + " ".repeat(1_000))
+            store.store(key, CacheEntry(url = "https://site.example/" + index), body)
             clock.advance(1_000L)
         }
 
@@ -170,6 +171,7 @@ class HttpCacheTest {
     @Test
     fun `битое тело считается промахом и не ломает`(): Unit = runBlocking {
         server.enqueue(MockResponse().setBody(html("каталог")))
+        server.enqueue(MockResponse().setBody(html("каталог после сбоя")))
         val store = cache()
         val url = server.url("/catalog").toString()
 
@@ -178,7 +180,8 @@ class HttpCacheTest {
 
         val again = fetcher(store).get(url)
 
-        again.contains("каталог") shouldBe true
+        again.contains("после сбоя") shouldBe true
+        server.requestCount shouldBe 2
     }
 
     @Test

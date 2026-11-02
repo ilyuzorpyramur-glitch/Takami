@@ -96,7 +96,9 @@ class HttpCache(
         val current = index()[key] ?: return@withLock null
         val body = withContext(Dispatchers.IO) {
             val file = File(dir, current.fileName)
-            if (!current.fileName.isBlank() && file.isFile) file.readText() else null
+            val text = if (!current.fileName.isBlank() && file.isFile) file.readText() else null
+            // Обрезанный файл считаем промахом: пустая страница всё равно не пройдёт ворота.
+            text?.takeIf { it.isNotEmpty() }
         }
         if (body == null) {
             removeLocked(key)
