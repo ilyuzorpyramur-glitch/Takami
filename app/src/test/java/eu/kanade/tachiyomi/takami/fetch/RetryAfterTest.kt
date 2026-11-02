@@ -32,7 +32,7 @@ class RetryAfterTest {
     }
 
     @Test
-    fun `ответ 429 задаёт Retry-After, следующий ждёт`(): Unit = runBlocking {
+    fun `429 задаёт паузу`(): Unit = runBlocking {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 arrivals += clock.now()
