@@ -104,7 +104,7 @@ class Fetcher internal constructor(
         }
 
         val store = cache
-        val cached = store?.lookup(key, at)
+        val cached = store?.lookup(store.key(url, referer), at)
         if (cached != null && store.isFresh(cached.entry, at)) {
             remember(key, cached.page, at)
             return cached.page
@@ -118,7 +118,7 @@ class Fetcher internal constructor(
         // дойдёт до конца, ответ ляжет в кэш и не пропадёт впустую.
         scope.launch {
             try {
-                val loaded = fetchWithCache(url, referer, priority, key, cached)
+                val loaded = fetchWithCache(url, referer, priority, cached)
                 remember(key, loaded, guard.now())
                 slot.complete(loaded)
             } catch (e: Throwable) {
@@ -143,10 +143,10 @@ class Fetcher internal constructor(
         url: String,
         referer: String?,
         priority: FetchPriority,
-        key: String,
         cached: CachedHit?,
     ): FetchedPage {
         val store = cache
+        val key = store?.key(url, referer).orEmpty()
         val conditional = Conditional.headers(cached?.entry)
 
         val loaded = try {

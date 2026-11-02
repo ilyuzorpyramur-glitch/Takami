@@ -1,7 +1,7 @@
 package eu.kanade.tachiyomi.takami.fetch
 
-import io.kotest.matchers.longs.shouldBeGreaterThan
-import io.kotest.matchers.longs.shouldBeLessThan
+import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
+import io.kotest.matchers.longs.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.Dispatcher
@@ -120,8 +120,8 @@ class HttpCacheTest {
         val store = cache()
         val ttl = store.ttlFor("anime.example")
 
-        ttl shouldBeGreaterThan (FetchLimits.CACHE_TTL_MS - FetchLimits.CACHE_TTL_JITTER_MS).toLong()
-        ttl shouldBeLessThan (FetchLimits.CACHE_TTL_MS + FetchLimits.CACHE_TTL_JITTER_MS).toLong()
+        ttl shouldBeGreaterThanOrEqual (FetchLimits.CACHE_TTL_MS - FetchLimits.CACHE_TTL_JITTER_MS).toLong()
+        ttl shouldBeLessThanOrEqual (FetchLimits.CACHE_TTL_MS + FetchLimits.CACHE_TTL_JITTER_MS).toLong()
 
         val entry = CacheEntry(fetchedAt = clock.now(), ttlMs = ttl)
         store.isFresh(entry) shouldBe true
@@ -149,7 +149,7 @@ class HttpCacheTest {
             clock.advance(1_000L)
         }
 
-        store.sizeBytes() shouldBeLessThan 2_049L
+        store.sizeBytes() shouldBeLessThanOrEqual 2_048L
         store.lookup(store.key("https://site.example/0", null)) shouldBe null
         (store.lookup(store.key("https://site.example/5", null)) != null) shouldBe true
     }

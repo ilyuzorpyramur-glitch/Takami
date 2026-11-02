@@ -12,6 +12,7 @@ import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import java.io.File
 import java.security.MessageDigest
+import kotlin.math.absoluteValue
 
 /** Найденная запись вместе с телом страницы. */
 data class CachedHit(
@@ -78,7 +79,7 @@ class HttpCache(
         // и тот же срок,
         // а разные устройства расходятся между собой и не бьют сайт
         // одновременно.
-        val offset = (seed.hashCode().toLong() % (spread + 1)) * 2 - spread
+        val offset = (seed.hashCode().toLong().absoluteValue % (spread + 1)) - spread / 2
         return FetchLimits.CACHE_TTL_MS + offset
     }
 
