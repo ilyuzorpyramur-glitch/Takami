@@ -120,8 +120,8 @@ class HttpCacheTest {
         val store = cache()
         val ttl = store.ttlFor("anime.example")
 
-        ttl shouldBeGreaterThan FetchLimits.CACHE_TTL_MS - FetchLimits.CACHE_TTL_JITTER_MS
-        ttl shouldBeLessThan FetchLimits.CACHE_TTL_MS + FetchLimits.CACHE_TTL_JITTER_MS
+        ttl shouldBeGreaterThan (FetchLimits.CACHE_TTL_MS - FetchLimits.CACHE_TTL_JITTER_MS).toLong()
+        ttl shouldBeLessThan (FetchLimits.CACHE_TTL_MS + FetchLimits.CACHE_TTL_JITTER_MS).toLong()
 
         val entry = CacheEntry(fetchedAt = clock.now(), ttlMs = ttl)
         store.isFresh(entry) shouldBe true
@@ -151,7 +151,7 @@ class HttpCacheTest {
 
         store.sizeBytes() shouldBeLessThan 2_049L
         store.lookup(store.key("https://site.example/0", null)) shouldBe null
-        store.lookup(store.key("https://site.example/5", null)) shouldBe null.not()
+        (store.lookup(store.key("https://site.example/5", null)) != null) shouldBe true
     }
 
     @Test
