@@ -13,7 +13,10 @@ import org.junit.jupiter.api.Test
 import java.util.Collections
 import kotlin.test.assertFailsWith
 
-/** Ответ 429: пауза из заголовка Retry-After уважается следующим запросом. */
+/**
+ * Ответ 429: пауза из заголовка Retry-After уважается следующим
+ * запросом.
+ */
 class RetryAfterTest {
     private lateinit var server: MockWebServer
     private lateinit var clock: FakeFetchClock
