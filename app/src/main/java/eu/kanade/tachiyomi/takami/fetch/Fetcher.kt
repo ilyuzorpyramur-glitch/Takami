@@ -257,8 +257,8 @@ class Fetcher internal constructor(
             // сайт.
             val extra = if (hops == 0) conditional else emptyMap()
             val raw = send(current, ref, priority, headers = extra)
-            val etag = raw.headers["ETag"]?.firstOrNull()
-            val lastModified = raw.headers["Last-Modified"]?.firstOrNull()
+            val etag = raw.headers["ETag"]
+            val lastModified = raw.headers["Last-Modified"]
 
             if (raw.code !in REDIRECTS) {
                 if (Conditional.isNotModified(raw.code)) {
