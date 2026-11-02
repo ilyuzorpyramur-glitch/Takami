@@ -41,10 +41,12 @@ class RequestBudgetTest {
     fun `301-й запрос за сутки не идёт в сеть`(): Unit = runBlocking {
         val clock = FakeFetchClock()
         val fetcher = Fetcher(OkHttpClient(), HostGuard(budget(), clock))
-        val url = server.url("/catalog").toString()
-
-        repeat(FetchLimits.DAILY_PER_HOST) { fetcher.get(url) }
-        val error = assertFailsWith<DailyLimitReached> { fetcher.get(url) }
+        repeat(FetchLimits.DAILY_PER_HOST) { index ->
+            fetcher.get(server.url("/p" + index).toString())
+        }
+        val error = assertFailsWith<DailyLimitReached> {
+            fetcher.get(server.url("/extra").toString())
+        }
 
         error.limit shouldBe FetchLimits.DAILY_PER_HOST
         server.requestCount shouldBe FetchLimits.DAILY_PER_HOST

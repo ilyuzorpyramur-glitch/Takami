@@ -78,6 +78,7 @@ class FetcherTest {
         server.enqueue(MockResponse().setBody("<html><body>каталог</body></html>"))
 
         val page = fetcher(budget).page(server.url("/catalog").toString())
+        println("DEBUG redirect count=" + server.requestCount + " url=" + page.url)
 
         server.requestCount shouldBe 2
         page.html.contains("каталог") shouldBe true
@@ -91,9 +92,9 @@ class FetcherTest {
             server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/loop"))
         }
 
-        assertFailsWith<TooManyRedirectsError> {
-            fetcher().get(server.url("/loop").toString())
-        }
+        val failure = runCatching { fetcher().get(server.url("/loop").toString()) }
+        println("DEBUG loop result=" + failure.exceptionOrNull() + " count=" + server.requestCount)
+        assertFailsWith<TooManyRedirectsError> { throw failure.exceptionOrNull()!! }
     }
 
     @Test
