@@ -367,7 +367,7 @@ class Fetcher internal constructor(
         fun get(): Fetcher = instance
             ?: throw IllegalStateException("Нет Fetcher: вызовите Fetcher.init(context)")
 
-        private fun buildClient(): OkHttpClient = OkHttpClient.Builder()
+        internal fun buildClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .writeTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)

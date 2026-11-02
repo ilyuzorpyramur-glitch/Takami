@@ -6,7 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -79,7 +78,7 @@ class HostGuardTest {
                 return MockResponse().setBody("<html>ok</html>")
             }
         }
-        val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget(), clock))
+        val fetcher = Fetcher(Fetcher.buildClient(), HostGuard(InMemoryRequestBudget(), clock))
 
         val screen = async(Dispatchers.IO) { fetcher.get(server.url("/screen").toString()) }
         gate.await()
@@ -105,7 +104,7 @@ class HostGuardTest {
         second.start()
 
         try {
-            val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget(), clock))
+            val fetcher = Fetcher(Fetcher.buildClient(), HostGuard(InMemoryRequestBudget(), clock))
             fetcher.get(server.url("/a").toString())
             fetcher.get(second.url("/b").toString())
 

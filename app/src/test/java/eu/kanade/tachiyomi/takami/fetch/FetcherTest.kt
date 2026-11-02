@@ -4,7 +4,6 @@ import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -35,7 +34,7 @@ class FetcherTest {
     }
 
     private fun fetcher(budget: RequestBudget = InMemoryRequestBudget()): Fetcher =
-        Fetcher(OkHttpClient(), HostGuard(budget, FakeFetchClock(), jitter = { 0L }))
+        Fetcher(Fetcher.buildClient(), HostGuard(budget, FakeFetchClock(), jitter = { 0L }))
 
     @Test
     fun `get отдаёт тело и заголовки`(): Unit = runBlocking {
@@ -78,8 +77,6 @@ class FetcherTest {
         server.enqueue(MockResponse().setBody("<html><body>каталог</body></html>"))
 
         val page = fetcher(budget).page(server.url("/catalog").toString())
-        println("DEBUG redirect count=" + server.requestCount + " url=" + page.url)
-
         server.requestCount shouldBe 2
         page.html.contains("каталог") shouldBe true
         page.url.contains("mirror") shouldBe true
@@ -92,9 +89,9 @@ class FetcherTest {
             server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/loop"))
         }
 
-        val failure = runCatching { fetcher().get(server.url("/loop").toString()) }
-        println("DEBUG loop result=" + failure.exceptionOrNull() + " count=" + server.requestCount)
-        assertFailsWith<TooManyRedirectsError> { throw failure.exceptionOrNull()!! }
+        assertFailsWith<TooManyRedirectsError> {
+            fetcher().get(server.url("/loop").toString())
+        }
     }
 
     @Test

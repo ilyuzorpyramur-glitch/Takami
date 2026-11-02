@@ -3,7 +3,6 @@ package eu.kanade.tachiyomi.takami.fetch
 import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -47,7 +46,7 @@ class RetryAfterTest {
             }
         }
 
-        val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget(), clock))
+        val fetcher = Fetcher(Fetcher.buildClient(), HostGuard(InMemoryRequestBudget(), clock))
         val url = server.url("/catalog").toString()
 
         val error = assertFailsWith<HttpStatusError> { fetcher.get(url) }
@@ -67,7 +66,7 @@ class RetryAfterTest {
             override fun dispatch(request: RecordedRequest): MockResponse = MockResponse().setResponseCode(429)
         }
 
-        val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget(), clock))
+        val fetcher = Fetcher(Fetcher.buildClient(), HostGuard(InMemoryRequestBudget(), clock))
         val error = assertFailsWith<HttpStatusError> { fetcher.get(server.url("/x").toString()) }
 
         error.retryAfterMs shouldBe FetchLimits.DEFAULT_RETRY_AFTER_MS

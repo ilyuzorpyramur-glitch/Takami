@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.takami.fetch
 
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -40,7 +39,7 @@ class RequestBudgetTest {
     @Test
     fun `301-й запрос за сутки не идёт в сеть`(): Unit = runBlocking {
         val clock = FakeFetchClock()
-        val fetcher = Fetcher(OkHttpClient(), HostGuard(budget(), clock))
+        val fetcher = Fetcher(Fetcher.buildClient(), HostGuard(budget(), clock))
         repeat(FetchLimits.DAILY_PER_HOST) { index ->
             fetcher.get(server.url("/p" + index).toString())
         }
@@ -55,7 +54,7 @@ class RequestBudgetTest {
     @Test
     fun `счётчик ведётся по домену`(): Unit = runBlocking {
         val store = budget()
-        val fetcher = Fetcher(OkHttpClient(), HostGuard(store, FakeFetchClock()))
+        val fetcher = Fetcher(Fetcher.buildClient(), HostGuard(store, FakeFetchClock()))
 
         fetcher.get(server.url("/one").toString())
         fetcher.get(server.url("/two").toString())
