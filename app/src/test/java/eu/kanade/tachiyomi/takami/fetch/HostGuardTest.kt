@@ -13,7 +13,9 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.Collections
 
-/** Лимиты домена на виртуальных часах: тест не ждёт реальное время. */
+/**
+ * Лимиты домена на виртуальных часах: тест не ждёт реальное время.
+ */
 class HostGuardTest {
     private lateinit var server: MockWebServer
     private lateinit var clock: FakeFetchClock
@@ -38,7 +40,7 @@ class HostGuardTest {
     }
 
     @Test
-    fun `два запроса к домену идут с паузой 1500 мс`(): Unit = runBlocking {
+    fun `пауза между запросами 1500 мс`(): Unit = runBlocking {
         val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget(), clock))
         val url = server.url("/catalog").toString()
 
