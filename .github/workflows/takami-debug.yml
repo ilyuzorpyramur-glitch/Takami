@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "app/src/main/**"
+      - "app/src/test/**"
       - "i18n/src/**"
       - ".github/workflows/takami-debug.yml"
   workflow_dispatch:
@@ -28,8 +29,17 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@94baf225fe0a508e581a564467443d0e2379123b # v4.3.0
 
-      - name: Build debug
-        run: ./gradlew :app:assembleDebug --console=plain
+      - name: Unit tests (сетевой слой Takami)
+        run: ./gradlew :app:testDebugUnitTest --tests "eu.kanade.tachiyomi.takami.fetch.*" --console=plain
+
+      - name: Build debug (x86_64)
+        run: ./gradlew :app:assembleDebug -Ptakami.abi=x86_64 --console=plain
+
+      - name: Проверить, что APK ровно один
+        run: |
+          count=$(ls app/build/outputs/apk/debug/*.apk | wc -l)
+          echo "Собрано APK: $count"
+          test "$count" -eq 1
 
       - name: Upload APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

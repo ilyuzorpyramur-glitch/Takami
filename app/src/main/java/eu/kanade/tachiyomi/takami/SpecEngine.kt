@@ -3,17 +3,14 @@ package eu.kanade.tachiyomi.takami
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
-import kotlinx.coroutines.Dispatchers
+import eu.kanade.tachiyomi.takami.fetch.Fetcher
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
-import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.io.IOException
 import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 
 /**
  * Исполнитель спеки: превращает [SiteSpec] в каталог, карточку, серии и видео.
@@ -22,8 +19,11 @@ import java.util.concurrent.TimeUnit
  * Это и есть аналог парсеров AniLabX, но без сборки APK: спека лежит в filesDir.
  */
 class SpecEngine(
-    private val client: OkHttpClient = defaultClient,
+    private val fetcherOverride: Fetcher? = null,
 ) {
+
+    private val fetcher: Fetcher
+        get() = fetcherOverride ?: Fetcher.get()
 
     suspend fun catalogue(spec: SiteSpec, page: Int): Pair<List<SAnime>, Boolean> {
         val url = pageUrl(spec.baseUrl, spec.catalog.path, spec.catalog.pagination, page)
@@ -282,34 +282,17 @@ class SpecEngine(
         }
     }
 
-    suspend fun fetch(url: String, referer: String? = null): String {
-        val builder = Request.Builder()
-            .url(url)
-            .header("User-Agent", USER_AGENT)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-            .header("Accept-Language", "ru,en;q=0.9")
-        if (referer != null) builder.header("Referer", referer)
-        return client.newCall(builder.build()).execute().use { response ->
-            if (!response.isSuccessful && response.code !in 300..399) {
-                error("HTTP " + response.code + " " + url)
-            }
-            response.body.string()
-        }
-    }
+    /** Все запросы идут через [Fetcher]: лимиты, повторы и кэш живут там. */
+    suspend fun fetch(url: String, referer: String? = null): String = fetcher.get(url, referer)
 
     /**
      * Первые байты медиа: проверяем, что ссылка отдаёт поток, а не страницу.
      * Трафик минимальный — Range 0..256.
      */
-    suspend fun probe(url: String, referer: String? = null): String = withContext(Dispatchers.IO) {
-        val builder = Request.Builder()
-            .url(url)
-            .header("User-Agent", USER_AGENT)
-            .header("Range", "bytes=0-256")
-        if (referer != null) builder.header("Referer", referer)
-        runCatching {
-            client.newCall(builder.build()).execute().use { it.body.string() }
-        }.getOrDefault("")
+    suspend fun probe(url: String, referer: String? = null): String = try {
+        fetcher.probe(url, referer)
+    } catch (e: IOException) {
+        ""
     }
 
     private fun text(doc: Document, selector: String?): String {
@@ -342,18 +325,6 @@ class SpecEngine(
     }
 
     companion object {
-        const val USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
-                "Chrome/124.0.0.0 Mobile Safari/537.36"
-
-        val defaultClient: OkHttpClient by lazy {
-            OkHttpClient.Builder()
-                .connectTimeout(20, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS)
-                .followRedirects(true)
-                .build()
-        }
-
         private val MEDIA_URL = Regex(
             """(?:https?:)?//[^\s"'<>]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"'<>]*)?""",
         )

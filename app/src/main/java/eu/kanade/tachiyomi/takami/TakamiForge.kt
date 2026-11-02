@@ -9,6 +9,7 @@ import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.takami.fetch.Fetcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -135,6 +136,8 @@ object TakamiForge {
     val specs: StateFlow<List<SiteSpec>> = _specs.asStateFlow()
 
     fun init(context: Context) {
+        // Сетевой слой готовим здесь же: до первого запроса к сайту он уже настроен.
+        Fetcher.init(context)
         val target = File(context.filesDir, DIR).apply { mkdirs() }
         val first = dir == null
         dir = target

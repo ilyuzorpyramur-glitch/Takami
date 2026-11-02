@@ -13,6 +13,11 @@ plugins {
 }
 val hasPrivateGeminiBridge = findProject(":private-gemini-bridge") != null
 
+// CI собирает один APK под x86_64 для эмулятора: -Ptakami.abi=x86_64.
+// Тогда splits выключены, а фильтр ABI оставляет одну архитектуру, то есть ровно один APK.
+// Без флага поведение прежнее: splits включены, все ABI плюс универсальный APK.
+val takamiAbi = providers.gradleProperty("takami.abi").orNull
+
 android {
     namespace = "com.tadami.aurora"
 
@@ -41,6 +46,10 @@ android {
         // buildConfigField("String", "ACRA_PASSWORD", "\"$acraPassword\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        if (takamiAbi != null) {
+            ndk { abiFilters += takamiAbi }
+        }
     }
 
     buildTypes {
@@ -99,7 +108,7 @@ android {
 
     splits {
         abi {
-            isEnable = true
+            isEnable = takamiAbi == null
             isUniversalApk = true
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
