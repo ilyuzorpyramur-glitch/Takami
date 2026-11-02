@@ -1,10 +1,13 @@
 package eu.kanade.tachiyomi.takami.fetch
 
 import android.content.Context
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import okhttp3.ConnectionPool
@@ -12,12 +15,14 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.Headers
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okio.Buffer
 import tachiyomi.core.common.util.system.logcat
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
@@ -39,35 +44,230 @@ data class ResponseInfo(
 }
 
 /**
+  * Готовая страница: текст, конечный адрес после редиректов и
+  * кодировка.
+ *
+  * Конечный адрес важен не меньше текста: от него считаются
+  * относительные ссылки,
+ * а без него карточки каталога ведут в несуществующие пути.
+ */
+data class FetchedPage(
+    val html: String,
+    val url: String,
+    val charset: String,
+    val code: Int,
+    val headers: Map<String, List<String>> = emptyMap(),
+)
+
+/**
  * Единственная точка HTTP для виртуальных источников.
  *
-  * Наружу не отдаёт [OkHttpClient]: иначе лимиты, повторы и кэш можно было
-  * бы обойти,
-  * создав свой клиент. Внутри — пул соединений, gzip, HTTP/2, cookie-jar и
-  * таймауты 20/20 с.
+  * Наружу не отдаёт [OkHttpClient]: иначе лимиты и кэш можно обойти,
+  * создав свой
+ * клиент. Внутри — пул соединений, gzip, HTTP/2, cookie-jar и таймауты 20/20 с.
  */
 class Fetcher internal constructor(
     private val client: OkHttpClient,
     private val guard: HostGuard,
 ) {
-    suspend fun get(url: String, referer: String? = null): String =
-        call(request(url, referer).get().build(), readBody = true).body
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val inFlight = ConcurrentHashMap<String, CompletableDeferred<FetchedPage>>()
+    private val memory = ConcurrentHashMap<String, Remembered>()
 
-    suspend fun head(url: String): ResponseInfo {
-        val result = call(request(url, null).head().build(), readBody = false)
-        return ResponseInfo(result.code, result.url, result.headers.toMultimap())
+    suspend fun get(
+        url: String,
+        referer: String? = null,
+        priority: FetchPriority = FetchPriority.INTERACTIVE,
+    ): String = page(url, referer, priority).html
+
+    /**
+     * Страница целиком.
+     *
+      * Одинаковые одновременные запросы склеиваются в один, а
+      * недавний ответ
+      * отдаётся из памяти: два экрана не превращаются в два
+      * обращения к сайту.
+     */
+    suspend fun page(
+        url: String,
+        referer: String? = null,
+        priority: FetchPriority = FetchPriority.INTERACTIVE,
+    ): FetchedPage {
+        currentCoroutineContext().ensureActive()
+        val key = keyOf(url, referer)
+
+        memory[key]?.let { entry ->
+            if (guard.now() - entry.at < FetchLimits.MEMORY_TTL_MS) return entry.page
+            memory.remove(key, entry)
+        }
+
+        val slot = CompletableDeferred<FetchedPage>()
+        inFlight.putIfAbsent(key, slot)?.let { return it.await() }
+
+        // Загрузку ведём вне корутины экрана: если он закроется,
+        // запрос всё равно
+        // дойдёт до конца, ответ ляжет в память и не пропадёт впустую.
+        scope.launch {
+            try {
+                val loaded = load(url, referer, priority)
+                remember(key, loaded)
+                slot.complete(loaded)
+            } catch (e: Throwable) {
+                slot.completeExceptionally(e)
+            } finally {
+                inFlight.remove(key, slot)
+            }
+        }
+        return slot.await()
     }
 
-    suspend fun post(url: String, body: String, referer: String? = null): String =
-        call(request(url, referer).post(body.toRequestBody(htmlMediaType)).build(), readBody = true).body
+    suspend fun head(url: String): ResponseInfo {
+        var current = url
+        var hops = 0
+        while (true) {
+            val raw = send(current, null, FetchPriority.INTERACTIVE, head = true)
+            if (raw.code !in REDIRECTS) return ResponseInfo(raw.code, raw.url, raw.headers.toMultimap())
+            val next = nextHop(current, raw, url)
+            if (++hops > FetchLimits.MAX_REDIRECTS) throw TooManyRedirectsError(url)
+            current = next
+        }
+    }
+
+    suspend fun post(url: String, body: String, referer: String? = null): String {
+        currentCoroutineContext().ensureActive()
+        val raw = send(url, referer, FetchPriority.INTERACTIVE, post = body)
+        return ResponseGate.check(raw.contentType, raw.bytes, raw.url).html
+    }
 
     /**
       * Первые байты медиа: проверяем, что ссылка отдаёт поток, а не
       * страницу.
-     * Трафик минимальный — Range 0..256.
+      * Читаем не больше [FetchLimits.PROBE_BYTES]: сервер вправе
+      * проигнорировать
+     * Range, и тогда без ограничения мы бы скачали весь файл.
      */
-    suspend fun probe(url: String, referer: String? = null): String =
-        call(request(url, referer).header("Range", "bytes=0-256").get().build(), readBody = true).body
+    suspend fun probe(url: String, referer: String? = null): String {
+        currentCoroutineContext().ensureActive()
+        val host = hostOf(url)
+        return guard.run(host) {
+            currentCoroutineContext().ensureActive()
+            val request = request(url, referer)
+                .header("Range", "bytes=0-" + (FetchLimits.PROBE_BYTES - 1))
+                .build()
+            val response = execute(request, host)
+            response.use { received ->
+                val code = received.code
+                if (code !in 200..299) throw HttpStatusError(code, url)
+                val source = received.body.source()
+                val buffer = Buffer()
+                while (buffer.size < FetchLimits.PROBE_BYTES) {
+                    if (source.read(buffer, FetchLimits.PROBE_BYTES - buffer.size) == -1L) break
+                }
+                // Байты двоичные: декодируем как latin1, чтобы метки
+                // остались читаемы.
+                buffer.readByteArray().toString(Charsets.ISO_8859_1)
+            }
+        }
+    }
+
+    /**
+     * Цепочка редиректов разворачивается по одному запросу: каждый
+     * — под лимитами.
+     */
+    private suspend fun load(
+        url: String,
+        referer: String?,
+        priority: FetchPriority,
+    ): FetchedPage {
+        var current = url
+        var ref = referer
+        var hops = 0
+        while (true) {
+            val raw = send(current, ref, priority)
+            if (raw.code !in REDIRECTS) {
+                val gated = ResponseGate.check(raw.contentType, raw.bytes, raw.url)
+                return FetchedPage(gated.html, raw.url, gated.charset, raw.code, raw.headers.toMultimap())
+            }
+            if (hops >= FetchLimits.MAX_REDIRECTS) throw TooManyRedirectsError(url)
+            val next = nextHop(current, raw, url)
+            hops++
+            ref = current
+            current = next
+        }
+    }
+
+    private suspend fun send(
+        url: String,
+        referer: String?,
+        priority: FetchPriority,
+        head: Boolean = false,
+        post: String? = null,
+    ): Raw {
+        currentCoroutineContext().ensureActive()
+        val host = hostOf(url)
+        val startedAt = guard.now()
+
+        return guard.run(host, priority) {
+            // Пока ждали слот и интервал, экран могли закрыть.
+            currentCoroutineContext().ensureActive()
+            val builder = request(url, referer)
+            val request = when {
+                head -> builder.head().build()
+                post != null -> builder.post(post.toRequestBody(htmlMediaType)).build()
+                else -> builder.get().build()
+            }
+            val response = execute(request, host)
+            response.use { received ->
+                val code = received.code
+                val retryAfter = if (code == HTTP_TOO_MANY_REQUESTS) retryAfterMs(received) else null
+                if (retryAfter != null) guard.retryAfter(host, retryAfter)
+                if (code !in 200..399) throw HttpStatusError(code, url, retryAfter)
+
+                val bytes = if (head) ByteArray(0) else readCapped(received)
+                logcat(LogPriority.DEBUG) {
+                    "Takami fetch: " + request.method + " " + host + " -> " + code +
+                        " за " + (guard.now() - startedAt) + " мс"
+                }
+                Raw(
+                    code = code,
+                    url = received.request.url.toString(),
+                    location = received.header("Location"),
+                    contentType = received.header("Content-Type"),
+                    headers = received.headers,
+                    bytes = bytes,
+                )
+            }
+        }
+    }
+
+    private fun nextHop(current: String, raw: Raw, original: String): String {
+        val location = raw.location
+        if (location.isNullOrBlank()) throw HttpStatusError(raw.code, original)
+        return current.toHttpUrlOrNull()?.resolve(location)?.toString()
+            ?: throw InvalidUrlError(location)
+    }
+
+    /**
+      * Тело с потолком: заявленный размер проверяем сразу, по факту
+      * — по ходу
+     * чтения. Так страховка работает и когда сервер врёт о длине.
+     */
+    private fun readCapped(response: Response): ByteArray {
+        val declared = response.body.contentLength()
+        if (declared > FetchLimits.MAX_HTML_BYTES) {
+            throw PageTooLargeError(response.request.url.toString(), declared)
+        }
+        val source = response.body.source()
+        val cap = FetchLimits.MAX_HTML_BYTES + 1
+        val buffer = Buffer()
+        while (buffer.size < cap) {
+            if (source.read(buffer, cap - buffer.size) == -1L) break
+        }
+        if (buffer.size > FetchLimits.MAX_HTML_BYTES) {
+            throw PageTooLargeError(response.request.url.toString(), buffer.size)
+        }
+        return buffer.readByteArray()
+    }
 
     private fun request(url: String, referer: String?): Request.Builder {
         val builder = try {
@@ -83,47 +283,32 @@ class Fetcher internal constructor(
         return builder
     }
 
-    private suspend fun call(request: Request, readBody: Boolean): HttpResult {
-        currentCoroutineContext().ensureActive()
-        val host = hostKey(request.url.host)
-        val startedAt = guard.now()
-
-        return guard.run(host) {
-            // Пока ждали слот и интервал, экран могли закрыть.
-            currentCoroutineContext().ensureActive()
-            val response = execute(request, host)
-            response.use { received ->
-                val code = received.code
-                val retryAfter = if (code == HTTP_TOO_MANY_REQUESTS) retryAfterMs(received) else null
-                if (retryAfter != null) guard.retryAfter(host, retryAfter)
-                if (code !in 200..399) {
-                    throw HttpStatusError(code, request.url.toString(), retryAfter)
-                }
-
-                val body = if (readBody) received.body.string() else ""
-                logcat(LogPriority.DEBUG) {
-                    "Takami fetch: " + request.method + " " + host + " -> " + code +
-                        " за " + (guard.now() - startedAt) + " мс"
-                }
-                HttpResult(code, request.url.toString(), body, received.headers)
-            }
-        }
-    }
-
     private suspend fun execute(request: Request, host: String): Response = try {
         withContext(Dispatchers.IO) { client.newCall(request).execute() }
-    } catch (e: CancellationException) {
-        throw e
     } catch (e: IOException) {
         throw NetworkError(host, e)
     }
 
-    private data class HttpResult(
+    private fun remember(key: String, page: FetchedPage) {
+        val now = guard.now()
+        memory[key] = Remembered(page, now)
+        memory.entries.removeIf { now - it.value.at >= FetchLimits.MEMORY_TTL_MS }
+        while (memory.size > FetchLimits.MEMORY_MAX_ENTRIES) {
+            val oldest = memory.entries.minByOrNull { it.value.at } ?: break
+            memory.remove(oldest.key, oldest.value)
+        }
+    }
+
+    private data class Raw(
         val code: Int,
         val url: String,
-        val body: String,
+        val location: String?,
+        val contentType: String?,
         val headers: Headers,
+        val bytes: ByteArray,
     )
+
+    private class Remembered(val page: FetchedPage, val at: Long)
 
     /**
      * Cookies держим в памяти: сайтам с сессией это нужно, на диск
@@ -161,12 +346,14 @@ class Fetcher internal constructor(
         private const val MAX_IDLE_CONNECTIONS = 4
         private const val KEEP_ALIVE_MINUTES = 5L
 
+        private val REDIRECTS = setOf(301, 302, 303, 307, 308)
+
         @Volatile
         private var instance: Fetcher? = null
 
         /**
          * Готовит общий сетевой слой. Вызывается при инициализации
-         * реестра источников.
+         * реестра.
          */
         fun init(context: Context, budget: RequestBudget? = null) {
             if (instance != null) return
@@ -187,12 +374,21 @@ class Fetcher internal constructor(
             .connectionPool(ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_MINUTES, TimeUnit.MINUTES))
             .cookieJar(InMemoryCookieJar())
             .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
-            .followRedirects(true)
-            .followSslRedirects(true)
+            // Редиректы разворачиваем сами: каждый переход —
+            // отдельный запрос
+            // под лимитами домена, а не бесплатный хоп внутри OkHttp.
+            .followRedirects(false)
+            .followSslRedirects(false)
             .build()
 
         /** Счётчики ведём по домену без www: www.site.ru и site.ru — один сайт. */
-        private fun hostKey(host: String): String = host.lowercase().removePrefix("www.")
+        private fun hostOf(url: String): String {
+            val host = url.toHttpUrlOrNull()?.host ?: throw InvalidUrlError(url)
+            return host.lowercase().removePrefix("www.")
+        }
+
+        private fun keyOf(url: String, referer: String?): String =
+            if (referer.isNullOrBlank()) url else url + "|" + referer
 
         private fun retryAfterMs(response: Response): Long {
             val seconds = response.header("Retry-After")?.trim()?.toLongOrNull()

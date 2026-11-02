@@ -6,6 +6,8 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.random.Random
 
 /**
  * Часы, подменяемые в тестах: ожидания лимитов не занимают
@@ -29,52 +31,78 @@ object SystemFetchClock : FetchClock {
  * Пропускает запросы через лимиты домена.
  *
   * Внутри: два общих слота, один запрос на домен, минимальный
-  * интервал,
-  * средний темп со всплеском, дневной бюджет и пауза после ответа
-  * 429.
- * Карта доменов чистится по простою и ограничена по размеру.
+  * интервал со
+  * случайной добавкой, средний темп со всплеском, дневной бюджет и
+  * пауза после
+  * ответа 429. Фоновые запросы уступают экрану: пока человек
+  * смотрит список,
+ * обновление библиотеки стоит в стороне.
  */
 class HostGuard(
     private val budget: RequestBudget,
     private val clock: FetchClock = SystemFetchClock,
+    private val jitter: () -> Long = { Random.nextLong(0L, FetchLimits.MIN_INTERVAL_JITTER_MS + 1) },
 ) {
     private val slots = Semaphore(FetchLimits.MAX_CONCURRENT_TOTAL)
+    private val backgroundSlots = Semaphore(FetchLimits.MAX_BACKGROUND_CONCURRENT)
+    private val interactive = AtomicInteger(0)
     private val hosts = ConcurrentHashMap<String, HostState>()
     private val pruneLock = Mutex()
 
     fun now(): Long = clock.now()
 
-    suspend fun <T> run(host: String, block: suspend () -> T): T {
+    suspend fun <T> run(
+        host: String,
+        priority: FetchPriority = FetchPriority.INTERACTIVE,
+        block: suspend () -> T,
+    ): T {
         // Потолок проверяем до очереди: ждать слот ради отказа смысла
         // нет.
         if (budget.remaining(host) <= 0) throw DailyLimitReached(host, FetchLimits.DAILY_PER_HOST)
 
-        while (true) {
-            prune(clock.now())
-            val state = hosts.getOrPut(host) { HostState(clock.now()) }
-            val done = slots.withPermit {
-                state.mutex.withLock {
-                    // Пока ждали слот, запись могли вычистить: берём
-                    // актуальную.
-                    if (hosts[host] !== state) return@withLock null
-                    state.busy = true
-                    var sent = false
-                    try {
-                        state.awaitTurn(clock)
-                        if (!budget.consume(host)) {
-                            throw DailyLimitReached(host, FetchLimits.DAILY_PER_HOST)
+        val takeBackground = priority == FetchPriority.BACKGROUND
+        if (takeBackground) {
+            backgroundSlots.acquire()
+            try {
+                while (interactive.get() > 0) clock.sleep(FetchLimits.BACKGROUND_POLL_MS)
+            } catch (e: Throwable) {
+                backgroundSlots.release()
+                throw e
+            }
+        }
+        if (!takeBackground) interactive.incrementAndGet()
+
+        try {
+            while (true) {
+                prune(clock.now())
+                val state = hosts.getOrPut(host) { HostState(clock.now()) }
+                val done = slots.withPermit {
+                    state.mutex.withLock {
+                        // Пока ждали слот, запись могли вычистить: берём
+                        // актуальную.
+                        if (hosts[host] !== state) return@withLock null
+                        state.busy = true
+                        var sent = false
+                        try {
+                            state.awaitTurn(clock)
+                            if (!budget.consume(host)) {
+                                throw DailyLimitReached(host, FetchLimits.DAILY_PER_HOST)
+                            }
+                            sent = true
+                            Outcome(block())
+                        } finally {
+                            // Паузу до следующего запроса считаем от конца
+                            // текущего.
+                            if (sent) state.markSent(clock.now(), jitter())
+                            state.busy = false
                         }
-                        sent = true
-                        Outcome(block())
-                    } finally {
-                        // Интервал до следующего запроса считаем от конца
-                        // текущего.
-                        if (sent) state.markSent(clock.now())
-                        state.busy = false
                     }
                 }
+                if (done != null) return done.value
             }
-            if (done != null) return done.value
+        } finally {
+            if (!takeBackground) interactive.decrementAndGet()
+            if (takeBackground) backgroundSlots.release()
         }
     }
 
@@ -90,9 +118,10 @@ class HostGuard(
      * Чистка карты доменов.
      *
       * Запускается только при превышении потолка: пока доменов
-      * мало, удалять нечего.
-      * Занятые записи не трогаем, иначе два запроса к одному домену
-      * могли бы пойти разом.
+      * мало, удалять
+      * нечего. Занятые записи не трогаем, иначе два запроса к одному
+      * домену могли
+     * бы пойти одновременно.
      */
     private suspend fun prune(now: Long) {
         if (hosts.size <= FetchLimits.MAX_HOSTS) return
@@ -153,10 +182,10 @@ class HostGuard(
             }
         }
 
-        fun markSent(now: Long) {
+        fun markSent(now: Long, jitterMs: Long) {
             refill(now)
             tokens = (tokens - 1.0).coerceAtLeast(0.0)
-            nextAllowedAt = now + FetchLimits.MIN_INTERVAL_MS
+            nextAllowedAt = now + FetchLimits.MIN_INTERVAL_MS + jitterMs.coerceAtLeast(0L)
             lastUsedAt = now
         }
 

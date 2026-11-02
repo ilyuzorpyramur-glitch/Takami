@@ -39,3 +39,33 @@ class NetworkError(
 class InvalidUrlError(
     val url: String,
 ) : FetchError("Некорректный адрес: " + url)
+
+/**
+ * Редиректы идут по кругу или их слишком много: цепочку обрываем.
+ */
+class TooManyRedirectsError(
+    val url: String,
+) : FetchError("Слишком много редиректов: " + url)
+
+/** Ответ пришёл, но это не страница: картинка, JSON, пустое тело. */
+class NotHtmlError(
+    val url: String,
+    val contentType: String,
+) : FetchError("Не HTML (" + contentType.ifBlank { "без типа" } + "): " + url)
+
+/**
+ * Страница больше разумного: скорее всего, отдали файл вместо
+ * разметки.
+ */
+class PageTooLargeError(
+    val url: String,
+    val bytes: Long,
+) : FetchError("Страница слишком большая: " + bytes + " байт, " + url)
+
+/**
+ * Заглушка антибота. Повторять такой запрос нельзя: именно повтор
+ * и блокирует.
+ */
+class ChallengePageError(
+    val url: String,
+) : FetchError("Сайт просит проверку браузера: " + url)

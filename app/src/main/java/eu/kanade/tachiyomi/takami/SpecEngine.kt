@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.takami
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.takami.fetch.FetchedPage
 import eu.kanade.tachiyomi.takami.fetch.Fetcher
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
@@ -27,15 +28,15 @@ class SpecEngine(
 
     suspend fun catalogue(spec: SiteSpec, page: Int): Pair<List<SAnime>, Boolean> {
         val url = pageUrl(spec.baseUrl, spec.catalog.path, spec.catalog.pagination, page)
-        val html = fetch(url)
-        return parseCatalogue(spec, html, url)
+        val page = fetchPage(url)
+        return parseCatalogue(spec, page.html, page.url)
     }
 
     suspend fun latest(spec: SiteSpec, page: Int): Pair<List<SAnime>, Boolean> {
         val path = spec.catalog.latestPath ?: spec.catalog.path
         val url = pageUrl(spec.baseUrl, path, spec.catalog.pagination, page)
-        val html = fetch(url)
-        return parseCatalogue(spec, html, url)
+        val page = fetchPage(url)
+        return parseCatalogue(spec, page.html, page.url)
     }
 
     suspend fun search(spec: SiteSpec, page: Int, query: String): Pair<List<SAnime>, Boolean> {
@@ -86,8 +87,8 @@ class SpecEngine(
     }
 
     suspend fun details(spec: SiteSpec, anime: SAnime): SAnime {
-        val html = fetch(anime.url)
-        val doc = Jsoup.parse(html, anime.url)
+        val animePage = fetchPage(anime.url)
+        val doc = Jsoup.parse(animePage.html, animePage.url)
         val d = spec.details
 
         return SAnime.create().apply {
@@ -102,8 +103,8 @@ class SpecEngine(
     }
 
     suspend fun episodes(spec: SiteSpec, anime: SAnime): List<SEpisode> {
-        val html = fetch(anime.url)
-        val doc = Jsoup.parse(html, anime.url)
+        val animePage = fetchPage(anime.url)
+        val doc = Jsoup.parse(animePage.html, animePage.url)
         val e = spec.episodes
         val numberRegex = Regex(e.numberRegex)
 
@@ -161,7 +162,7 @@ class SpecEngine(
     }
 
     suspend fun videos(spec: SiteSpec, episode: SEpisode): List<Video> {
-        val first = fetch(episode.url)
+        val first = fetchPage(episode.url)
         val links = linkedMapOf<String, String>()
         val labelled = Regex(spec.video.labelRegex)
 
@@ -190,10 +191,10 @@ class SpecEngine(
             }
         }
 
-        collect(first)
+        collect(first.html)
 
         // Плеер-обёртка: видео лежит на следующем уровне iframe.
-        var html = first
+        var html = first.html
         var depth = 0
         while (links.isEmpty() && depth < spec.video.iframeDepth) {
             val doc = Jsoup.parse(html, episode.url)
@@ -282,8 +283,17 @@ class SpecEngine(
         }
     }
 
-    /** Все запросы идут через [Fetcher]: лимиты, повторы и кэш живут там. */
+    /** Все запросы идут через [Fetcher]: лимиты, кэш и повторы живут там. */
     suspend fun fetch(url: String, referer: String? = null): String = fetcher.get(url, referer)
+
+    /**
+     * Страница вместе с конечным адресом после редиректов.
+     *
+     * Относительные ссылки нужно считать от него: иначе карточки каталога ведут
+     * в несуществующие пути, а вёрстка выглядит «сломанной».
+     */
+    internal suspend fun fetchPage(url: String, referer: String? = null): FetchedPage =
+        fetcher.page(url, referer)
 
     /**
      * Первые байты медиа: проверяем, что ссылка отдаёт поток, а не страницу.

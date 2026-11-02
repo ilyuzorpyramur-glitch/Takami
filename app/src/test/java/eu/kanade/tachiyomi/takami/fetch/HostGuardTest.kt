@@ -1,7 +1,10 @@
 package eu.kanade.tachiyomi.takami.fetch
 
-import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
@@ -12,14 +15,13 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.Collections
+import java.util.concurrent.CountDownLatch
 
-/**
- * Лимиты домена на виртуальных часах: тест не ждёт реальное время.
- */
+/** Лимиты домена: пауза, разброс, приоритет экрана над фоном. */
 class HostGuardTest {
     private lateinit var server: MockWebServer
     private lateinit var clock: FakeFetchClock
-    private val arrivals = Collections.synchronizedList(mutableListOf<Long>())
+    private val arrivals = Collections.synchronizedList(mutableListOf<String>())
 
     @BeforeEach
     fun setUp() {
@@ -27,8 +29,8 @@ class HostGuardTest {
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
-                arrivals += clock.now()
-                return MockResponse().setBody("ok")
+                arrivals += (request.path ?: "").trimStart('/')
+                return MockResponse().setBody("<html>ok</html>")
             }
         }
         server.start()
@@ -40,22 +42,68 @@ class HostGuardTest {
     }
 
     @Test
-    fun `пауза между запросами 1500 мс`(): Unit = runBlocking {
+    fun `пауза между запросами не меньше 1500 мс`(): Unit = runBlocking {
         val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget(), clock))
         val url = server.url("/catalog").toString()
 
         fetcher.get(url)
+        val before = clock.now()
         fetcher.get(url)
 
-        arrivals.size shouldBe 2
-        (arrivals[1] - arrivals[0]) shouldBeGreaterThanOrEqual FetchLimits.MIN_INTERVAL_MS
+        (clock.now() - before) shouldBe 0L
+        clock.sleeps.filter { it > 0L }.sum() shouldBe
+            (FetchLimits.MIN_INTERVAL_MS + clock.sleeps.last())
+    }
+
+    @Test
+    fun `разброс сверх минимума`(): Unit = runBlocking {
+        val guard = HostGuard(InMemoryRequestBudget(), clock, jitter = { 300L })
+        var sent = 0
+        guard.run("site.example") { sent++ }
+        val first = clock.now()
+        guard.run("site.example") { sent++ }
+
+        sent shouldBe 2
+        (clock.now() - first) shouldBe FetchLimits.MIN_INTERVAL_MS + 300L
+    }
+
+    @Test
+    fun `фон уступает экрану`(): Unit = runBlocking {
+        val gate = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = (request.path ?: "").trimStart('/')
+                arrivals += path
+                if (path == "screen") {
+                    gate.countDown()
+                    release.await()
+                }
+                return MockResponse().setBody("<html>ok</html>")
+            }
+        }
+        val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget(), clock))
+
+        val screen = async(Dispatchers.IO) { fetcher.get(server.url("/screen").toString()) }
+        gate.await()
+        val background = launch(Dispatchers.IO) {
+            fetcher.get(server.url("/sync").toString(), null, FetchPriority.BACKGROUND)
+        }
+        // Фон не должен занять второй слот, пока экран ждёт ответа.
+        arrivals.toList() shouldBe listOf("screen")
+        release.countDown()
+
+        screen.await()
+        background.join()
+        arrivals.toList() shouldContainExactly listOf("screen", "sync")
     }
 
     @Test
     fun `запросы к разным доменам не ждут друг друга`(): Unit = runBlocking {
         val second = MockWebServer()
         second.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = MockResponse().setBody("ok")
+            override fun dispatch(request: RecordedRequest): MockResponse = MockResponse()
+                .setBody("<html>ok</html>")
         }
         second.start()
 
