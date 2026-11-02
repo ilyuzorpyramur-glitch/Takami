@@ -98,7 +98,8 @@ class HttpCache(
             val file = File(dir, current.fileName)
             val readable = !current.fileName.isBlank() && file.isFile
             val text = if (readable) file.readText() else null
-            // Обрезанный файл считаем промахом: пустая страница всё равно не пройдёт ворота.
+            // Обрезанный файл считаем промахом: пустая страница всё
+            // равно не пройдёт ворота.
             text?.takeIf { it.isNotEmpty() }
         }
         if (body == null) {
