@@ -69,6 +69,7 @@ data class FetchedPage(
 class Fetcher internal constructor(
     private val client: OkHttpClient,
     private val guard: HostGuard,
+    private val cache: HttpCache? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val inFlight = ConcurrentHashMap<String, CompletableDeferred<FetchedPage>>()
@@ -81,12 +82,12 @@ class Fetcher internal constructor(
     ): String = page(url, referer, priority).html
 
     /**
-     * Страница целиком.
+     * Страница целиком: память, затем диск, затем сеть.
      *
-      * Одинаковые одновременные запросы склеиваются в один, а
-      * недавний ответ
-      * отдаётся из памяти: два экрана не превращаются в два
-      * обращения к сайту.
+      * Одинаковые одновременные запросы склеиваются в один, свежая
+      * запись с диска
+      * отдаётся без обращения к сайту, просроченная проверяется
+      * условным запросом.
      */
     suspend fun page(
         url: String,
@@ -95,10 +96,18 @@ class Fetcher internal constructor(
     ): FetchedPage {
         currentCoroutineContext().ensureActive()
         val key = keyOf(url, referer)
+        val at = guard.now()
 
         memory[key]?.let { entry ->
-            if (guard.now() - entry.at < FetchLimits.MEMORY_TTL_MS) return entry.page
+            if (at - entry.at < FetchLimits.MEMORY_TTL_MS) return entry.page
             memory.remove(key, entry)
+        }
+
+        val store = cache
+        val cached = store?.lookup(key, at)
+        if (cached != null && store.isFresh(cached.entry, at)) {
+            remember(key, cached.page, at)
+            return cached.page
         }
 
         val slot = CompletableDeferred<FetchedPage>()
@@ -106,11 +115,11 @@ class Fetcher internal constructor(
 
         // Загрузку ведём вне корутины экрана: если он закроется,
         // запрос всё равно
-        // дойдёт до конца, ответ ляжет в память и не пропадёт впустую.
+        // дойдёт до конца, ответ ляжет в кэш и не пропадёт впустую.
         scope.launch {
             try {
-                val loaded = load(url, referer, priority)
-                remember(key, loaded)
+                val loaded = fetchWithCache(url, referer, priority, key, cached)
+                remember(key, loaded, guard.now())
                 slot.complete(loaded)
             } catch (e: Throwable) {
                 slot.completeExceptionally(e)
@@ -119,6 +128,66 @@ class Fetcher internal constructor(
             }
         }
         return slot.await()
+    }
+
+    /**
+     * Один проход к сайту с учётом сохранённой записи.
+     *
+      * Порядок разбора: «не изменилось» — берём диск; страница без
+      * метки версии, но
+      * с тем же отпечатком — тоже диск; иначе сохраняем новое. Если
+      * сайт недоступен,
+     * отдаём последнее сохранённое, чтобы экран не остался пустым.
+     */
+    private suspend fun fetchWithCache(
+        url: String,
+        referer: String?,
+        priority: FetchPriority,
+        key: String,
+        cached: CachedHit?,
+    ): FetchedPage {
+        val store = cache
+        val conditional = Conditional.headers(cached?.entry)
+
+        val loaded = try {
+            load(url, referer, priority, conditional)
+        } catch (e: IOException) {
+            if (cached != null) return cached.page
+            throw e
+        }
+
+        if (loaded.notModified) {
+            val hit = cached ?: throw HttpStatusError(Conditional.NOT_MODIFIED, url)
+            store?.confirm(key, guard.now(), loaded.etag, loaded.lastModified)
+            return hit.page
+        }
+
+        val page = loaded.page ?: throw HttpStatusError(loaded.code, url)
+        if (store == null) return page
+
+        val unchanged = cached != null &&
+            loaded.etag == null &&
+            loaded.bytes != null &&
+            Conditional.sameContent(cached.entry, loaded.bytes)
+        if (unchanged) {
+            store.confirm(key, guard.now(), null, null)
+            return cached.page
+        }
+
+        store.store(
+            key = key,
+            entry = CacheEntry(
+                url = page.url,
+                referer = referer ?: "",
+                etag = loaded.etag,
+                lastModified = loaded.lastModified,
+                fetchedAt = guard.now(),
+                ttlMs = store.ttlFor(hostOf(url)),
+                charset = page.charset,
+            ),
+            html = page.html,
+        )
+        return page
     }
 
     suspend fun head(url: String): ResponseInfo {
@@ -163,8 +232,6 @@ class Fetcher internal constructor(
                 while (buffer.size < FetchLimits.PROBE_BYTES) {
                     if (source.read(buffer, FetchLimits.PROBE_BYTES - buffer.size) == -1L) break
                 }
-                // Байты двоичные: декодируем как latin1, чтобы метки
-                // остались читаемы.
                 buffer.readByteArray().toString(Charsets.ISO_8859_1)
             }
         }
@@ -178,16 +245,49 @@ class Fetcher internal constructor(
         url: String,
         referer: String?,
         priority: FetchPriority,
-    ): FetchedPage {
+        conditional: Map<String, String> = emptyMap(),
+    ): Loaded {
         var current = url
         var ref = referer
         var hops = 0
         while (true) {
-            val raw = send(current, ref, priority)
+            // Условные заголовки относятся к исходному адресу: после
+            // перехода
+            // метка версии уже от другой страницы и только запутает
+            // сайт.
+            val extra = if (hops == 0) conditional else emptyMap()
+            val raw = send(current, ref, priority, headers = extra)
+            val etag = raw.headers["ETag"]?.firstOrNull()
+            val lastModified = raw.headers["Last-Modified"]?.firstOrNull()
+
             if (raw.code !in REDIRECTS) {
+                if (Conditional.isNotModified(raw.code)) {
+                    return Loaded(
+                        page = null,
+                        notModified = true,
+                        code = raw.code,
+                        etag = etag,
+                        lastModified = lastModified,
+                    )
+                }
                 val gated = ResponseGate.check(raw.contentType, raw.bytes, raw.url)
-                return FetchedPage(gated.html, raw.url, gated.charset, raw.code, raw.headers.toMultimap())
+                val page = FetchedPage(
+                    html = gated.html,
+                    url = raw.url,
+                    charset = gated.charset,
+                    code = raw.code,
+                    headers = raw.headers.toMultimap(),
+                )
+                return Loaded(
+                    page = page,
+                    notModified = false,
+                    code = raw.code,
+                    etag = etag,
+                    lastModified = lastModified,
+                    bytes = raw.bytes,
+                )
             }
+
             if (hops >= FetchLimits.MAX_REDIRECTS) throw TooManyRedirectsError(url)
             val next = nextHop(current, raw, url)
             hops++
@@ -202,6 +302,7 @@ class Fetcher internal constructor(
         priority: FetchPriority,
         head: Boolean = false,
         post: String? = null,
+        headers: Map<String, String> = emptyMap(),
     ): Raw {
         currentCoroutineContext().ensureActive()
         val host = hostOf(url)
@@ -211,6 +312,7 @@ class Fetcher internal constructor(
             // Пока ждали слот и интервал, экран могли закрыть.
             currentCoroutineContext().ensureActive()
             val builder = request(url, referer)
+            headers.forEach { (name, value) -> builder.header(name, value) }
             val request = when {
                 head -> builder.head().build()
                 post != null -> builder.post(post.toRequestBody(htmlMediaType)).build()
@@ -289,10 +391,9 @@ class Fetcher internal constructor(
         throw NetworkError(host, e)
     }
 
-    private fun remember(key: String, page: FetchedPage) {
-        val now = guard.now()
-        memory[key] = Remembered(page, now)
-        memory.entries.removeIf { now - it.value.at >= FetchLimits.MEMORY_TTL_MS }
+    private fun remember(key: String, page: FetchedPage, at: Long) {
+        memory[key] = Remembered(page, at)
+        memory.entries.removeIf { at - it.value.at >= FetchLimits.MEMORY_TTL_MS }
         while (memory.size > FetchLimits.MEMORY_MAX_ENTRIES) {
             val oldest = memory.entries.minByOrNull { it.value.at } ?: break
             memory.remove(oldest.key, oldest.value)
@@ -306,6 +407,15 @@ class Fetcher internal constructor(
         val contentType: String?,
         val headers: Headers,
         val bytes: ByteArray,
+    )
+
+    private class Loaded(
+        val page: FetchedPage?,
+        val notModified: Boolean,
+        val code: Int,
+        val etag: String?,
+        val lastModified: String?,
+        val bytes: ByteArray? = null,
     )
 
     private class Remembered(val page: FetchedPage, val at: Long)
@@ -360,7 +470,7 @@ class Fetcher internal constructor(
             synchronized(this) {
                 if (instance != null) return
                 val guard = HostGuard(budget ?: FileRequestBudget(context.applicationContext))
-                instance = Fetcher(buildClient(), guard)
+                instance = Fetcher(buildClient(), guard, HttpCache(context.applicationContext))
             }
         }
 
@@ -382,7 +492,7 @@ class Fetcher internal constructor(
             .build()
 
         /** Счётчики ведём по домену без www: www.site.ru и site.ru — один сайт. */
-        private fun hostOf(url: String): String {
+        internal fun hostOf(url: String): String {
             val host = url.toHttpUrlOrNull()?.host ?: throw InvalidUrlError(url)
             return host.lowercase().removePrefix("www.")
         }
