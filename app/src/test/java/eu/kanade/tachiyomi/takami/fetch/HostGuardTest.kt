@@ -13,16 +13,19 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.Collections
 
+/** Лимиты домена на виртуальных часах: тест не ждёт реальное время. */
 class HostGuardTest {
     private lateinit var server: MockWebServer
+    private lateinit var clock: FakeFetchClock
     private val arrivals = Collections.synchronizedList(mutableListOf<Long>())
 
     @BeforeEach
     fun setUp() {
+        clock = FakeFetchClock()
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
-                arrivals += System.currentTimeMillis()
+                arrivals += clock.now()
                 return MockResponse().setBody("ok")
             }
         }
@@ -36,16 +39,14 @@ class HostGuardTest {
 
     @Test
     fun `два запроса к домену идут с паузой 1500 мс`(): Unit = runBlocking {
-        val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget()))
+        val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget(), clock))
         val url = server.url("/catalog").toString()
 
         fetcher.get(url)
         fetcher.get(url)
 
         arrivals.size shouldBe 2
-        // Допуск 10 мс: у часов миллисекундное округление, сам лимит —
-        // 1500 мс.
-        (arrivals[1] - arrivals[0]) shouldBeGreaterThanOrEqual 1_490L
+        (arrivals[1] - arrivals[0]) shouldBeGreaterThanOrEqual FetchLimits.MIN_INTERVAL_MS
     }
 
     @Test
@@ -57,7 +58,7 @@ class HostGuardTest {
         second.start()
 
         try {
-            val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget()))
+            val fetcher = Fetcher(OkHttpClient(), HostGuard(InMemoryRequestBudget(), clock))
             fetcher.get(server.url("/a").toString())
             fetcher.get(second.url("/b").toString())
 
