@@ -61,12 +61,12 @@ class DiagnosticsScreen : Screen() {
         var reports by remember { mutableStateOf<List<HostReport>>(emptyList()) }
         var loaded by remember { mutableStateOf(false) }
         var waiting by remember { mutableStateOf<List<VerificationStatus>>(emptyList()) }
-        var reports by remember { mutableStateOf(ReportsView()) }
+        var reportStatus by remember { mutableStateOf(ReportsView()) }
 
         suspend fun reload() {
             reports = NetworkDiagnostics.report()
             waiting = NetworkDiagnostics.verifications()
-            reports = NetworkDiagnostics.reports()
+            reportStatus = NetworkDiagnostics.reports()
             loaded = true
         }
 
@@ -142,7 +142,7 @@ class DiagnosticsScreen : Screen() {
                 }
 
                 Text(
-                    text = if (reports.active) {
+                    text = if (reportStatus.active) {
                         "Сбор отчётов для калибровки, до 31 января 2027. " +
                             "После этого выключится сам."
                     } else {
@@ -155,18 +155,18 @@ class DiagnosticsScreen : Screen() {
                     Column(Modifier.padding(12.dp)) {
                         Text(text = "Отчёты о сбоях", style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            text = "В очереди: " + reports.queued,
+                            text = "В очереди: " + reportStatus.queued,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
-                            text = "Отправлено всего: " + reports.totalSent,
+                            text = "Отправлено всего: " + reportStatus.totalSent,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
-                            text = if (reports.lastSentAt == 0L) {
+                            text = if (reportStatus.lastSentAt == 0L) {
                                 "Ещё не отправляли"
                             } else {
-                                "Последняя отправка: " + formatSent(reports.lastSentAt)
+                                "Последняя отправка: " + formatSent(reportStatus.lastSentAt)
                             },
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -177,11 +177,11 @@ class DiagnosticsScreen : Screen() {
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                             Switch(
-                                checked = reports.enabled,
+                                checked = reportStatus.enabled,
                                 onCheckedChange = { value ->
                                     scope.launch {
                                         NetworkDiagnostics.setReportsEnabled(value)
-                                        reports = NetworkDiagnostics.reports()
+                                        reportStatus = NetworkDiagnostics.reports()
                                     }
                                 },
                             )
@@ -191,7 +191,7 @@ class DiagnosticsScreen : Screen() {
                                 onClick = {
                                     scope.launch {
                                         NetworkDiagnostics.clearReports()
-                                        reports = NetworkDiagnostics.reports()
+                                        reportStatus = NetworkDiagnostics.reports()
                                     }
                                 },
                             ) {
