@@ -60,7 +60,10 @@ class FetcherTest {
 
     @Test
     fun `ответ 429 превращается в HttpStatusError с retryAfterMs`(): Unit = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "7"))
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                MockResponse().setResponseCode(429).setHeader("Retry-After", "7")
+        }
 
         val error = assertFailsWith<HttpStatusError> {
             fetcher().get(server.url("/catalog").toString())
@@ -68,6 +71,7 @@ class FetcherTest {
 
         error.code shouldBe 429
         error.retryAfterMs shouldBe 7_000L
+        server.requestCount shouldBe FetchLimits.RETRY_ATTEMPTS
     }
 
     @Test

@@ -62,11 +62,9 @@ import kotlinx.coroutines.flow.collectLatest
 import java.io.File
 
 /**
-  * Мастер добавления источника: ссылка → иконка → предпросмотр →
-  * качество → озвучки → сохранение.
+ * Мастер добавления источника: ссылка → иконка → предпросмотр → качество → озвучки → сохранение.
  *
-  * Каждый шаг показывает только то, что зависит от источника;
-  * ничего не обещает заранее.
+ * Каждый шаг показывает только то, что зависит от источника; ничего не обещает заранее.
  */
 class TakamiForgeScreen : Screen() {
 
@@ -139,10 +137,7 @@ class TakamiForgeScreen : Screen() {
         )
     }
 
-    /**
-     * Копируем выбранную картинку в файлы приложения: спека хранит
-     * только путь.
-     */
+    /** Копируем выбранную картинку в файлы приложения: спека хранит только путь. */
     private fun copyIcon(context: Context, uri: android.net.Uri, host: String?): String? = runCatching {
         val dir = File(context.filesDir, "takami/icons").apply { mkdirs() }
         val file = File(dir, (host ?: "source") + ".png")

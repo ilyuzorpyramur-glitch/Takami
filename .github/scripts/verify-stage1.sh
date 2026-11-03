@@ -52,7 +52,8 @@ fi
 # Изменения только в разрешённых путях
 if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
     CHANGED=$(git diff --name-only "$BASE"...HEAD 2>/dev/null)
-    OUT=$(echo "$CHANGED" | grep -vE '^(app/src/main/java/eu/kanade/tachiyomi/takami/|app/src/test/java/eu/kanade/tachiyomi/takami/|\.github/workflows/takami-debug\.yml|app/build\.gradle\.kts|gradle/libs\.versions\.toml|docs/|reports/)' | grep -v '^$')
+    # С этапа 3 по протоколу экран диагностики живёт в ui/takami — путь разрешён.
+    OUT=$(echo "$CHANGED" | grep -vE '^(app/src/main/java/eu/kanade/tachiyomi/takami/|app/src/main/java/eu/kanade/tachiyomi/ui/takami/|app/src/test/java/eu/kanade/tachiyomi/takami/|\.github/(workflows|scripts)/|app/build\.gradle\.kts|gradle/libs\.versions\.toml|docs/|reports/)' | grep -v '^$')
     if [ -z "$OUT" ]; then
         ok G0.3 "изменения в разрешённых путях ($(echo "$CHANGED" | grep -c . ) файлов)"
     else
