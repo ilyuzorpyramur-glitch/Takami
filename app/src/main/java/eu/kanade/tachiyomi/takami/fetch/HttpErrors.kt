@@ -69,3 +69,8 @@ class PageTooLargeError(
 class ChallengePageError(
     val url: String,
 ) : FetchError("Сайт просит проверку браузера: " + url)
+
+/** Домен в паузе после серии ошибок: запрос не отправляем. */
+class BreakerOpenError(
+    val host: String,
+) : FetchError("Сайт " + host + " на паузе после ошибок")

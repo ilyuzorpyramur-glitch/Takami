@@ -51,6 +51,24 @@ class HostGuard(
 
     fun now(): Long = clock.now()
 
+    /**
+     * Те же часы, что у лимитов: паузы повторов не должны ждать в
+     * обход.
+     */
+    internal val timeSource: FetchClock
+        get() = clock
+
+    internal suspend fun budgetHosts(): List<String> = budget.hosts()
+
+    internal suspend fun used(host: String): Int = budget.used(host)
+
+    internal suspend fun remaining(host: String): Int = budget.remaining(host)
+
+    internal val dailyLimit: Int
+        get() = FetchLimits.DAILY_PER_HOST
+
+    internal suspend fun resetBudget() = budget.reset()
+
     suspend fun <T> run(
         host: String,
         priority: FetchPriority = FetchPriority.INTERACTIVE,

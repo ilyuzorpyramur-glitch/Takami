@@ -36,6 +36,11 @@ interface RequestBudget {
     suspend fun consume(host: String): Boolean
 
     suspend fun reset()
+
+    /**
+     * Домены, к которым обращались сегодня: для экрана диагностики.
+     */
+    suspend fun hosts(): List<String>
 }
 
 /**
@@ -90,6 +95,11 @@ class FileRequestBudget(
         mutex.withLock {
             withContext(Dispatchers.IO) { file.delete() }
         }
+    }
+
+    override suspend fun hosts(): List<String> = mutex.withLock {
+        val state = read()
+        if (state.day == day()) state.used.keys.sorted() else emptyList()
     }
 
     private suspend fun read(): BudgetFile = withContext(Dispatchers.IO) {

@@ -24,6 +24,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okio.Buffer
 import tachiyomi.core.common.util.system.logcat
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -70,6 +71,7 @@ class Fetcher internal constructor(
     private val client: OkHttpClient,
     private val guard: HostGuard,
     private val cache: HttpCache? = null,
+    private val breaker: CircuitBreaker? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val inFlight = ConcurrentHashMap<String, CompletableDeferred<FetchedPage>>()
@@ -238,6 +240,36 @@ class Fetcher internal constructor(
     }
 
     /**
+     * Сводка по доменам: расход, остаток и состояние
+     * предохранителя.
+     */
+    suspend fun diagnostics(): List<HostReport> {
+        val hosts = (guard.budgetHosts() + (breaker?.hosts() ?: emptyList()))
+            .distinct()
+            .sorted()
+        return hosts.map { host ->
+            val info = breaker?.state(host)
+            HostReport(
+                host = host,
+                used = guard.used(host),
+                remaining = guard.remaining(host),
+                limit = guard.dailyLimit,
+                breaker = info?.state ?: BreakerState.CLOSED,
+                pauseLeftMs = info?.pauseLeftMs ?: 0L,
+                lastError = info?.lastError,
+            )
+        }
+    }
+
+    /**
+     * Сброс дневных счётчиков: кнопка в диагностике, только для
+     * отладочной сборки.
+     */
+    suspend fun resetCounters() {
+        guard.resetBudget()
+    }
+
+    /**
      * Цепочка редиректов разворачивается по одному запросу: каждый
      * — под лимитами.
      */
@@ -296,6 +328,15 @@ class Fetcher internal constructor(
         }
     }
 
+    /**
+     * Запрос с повторами.
+     *
+      * Повтор идёт тем же путём, что и первая попытка: через
+      * диспетчер лимитов и
+      * предохранитель. Своего клиента у повторов нет — иначе лимиты
+      * обходились бы
+     * одной строкой.
+     */
     private suspend fun send(
         url: String,
         referer: String?,
@@ -305,40 +346,63 @@ class Fetcher internal constructor(
         headers: Map<String, String> = emptyMap(),
     ): Raw {
         currentCoroutineContext().ensureActive()
+        return RetryPolicy().execute(guard.timeSource) {
+            attempt(url, referer, priority, head, post, headers)
+        }
+    }
+
+    private suspend fun attempt(
+        url: String,
+        referer: String?,
+        priority: FetchPriority,
+        head: Boolean,
+        post: String?,
+        headers: Map<String, String>,
+    ): Raw {
+        currentCoroutineContext().ensureActive()
         val host = hostOf(url)
         val startedAt = guard.now()
+        // Домен в паузе: ни одного запроса, даже пробного.
+        if (breaker?.allow(host) == false) throw BreakerOpenError(host)
 
-        return guard.run(host, priority) {
-            // Пока ждали слот и интервал, экран могли закрыть.
-            currentCoroutineContext().ensureActive()
-            val builder = request(url, referer)
-            headers.forEach { (name, value) -> builder.header(name, value) }
-            val request = when {
-                head -> builder.head().build()
-                post != null -> builder.post(post.toRequestBody(htmlMediaType)).build()
-                else -> builder.get().build()
-            }
-            val response = execute(request, host)
-            response.use { received ->
-                val code = received.code
-                val retryAfter = if (code == HTTP_TOO_MANY_REQUESTS) retryAfterMs(received) else null
-                if (retryAfter != null) guard.retryAfter(host, retryAfter)
-                if (code !in 200..399) throw HttpStatusError(code, url, retryAfter)
-
-                val bytes = if (head) ByteArray(0) else readCapped(received)
-                logcat(LogPriority.DEBUG) {
-                    "Takami fetch: " + request.method + " " + host + " -> " + code +
-                        " за " + (guard.now() - startedAt) + " мс"
+        return try {
+            val raw = guard.run(host, priority) {
+                // Пока ждали слот и интервал, экран могли закрыть.
+                currentCoroutineContext().ensureActive()
+                val builder = request(url, referer)
+                headers.forEach { (name, value) -> builder.header(name, value) }
+                val request = when {
+                    head -> builder.head().build()
+                    post != null -> builder.post(post.toRequestBody(htmlMediaType)).build()
+                    else -> builder.get().build()
                 }
-                Raw(
-                    code = code,
-                    url = received.request.url.toString(),
-                    location = received.header("Location"),
-                    contentType = received.header("Content-Type"),
-                    headers = received.headers,
-                    bytes = bytes,
-                )
+                val response = execute(request, host)
+                response.use { received ->
+                    val code = received.code
+                    val retryAfter = if (code == HTTP_TOO_MANY_REQUESTS) retryAfterMs(received) else null
+                    if (retryAfter != null) guard.retryAfter(host, retryAfter)
+                    if (code !in 200..399) throw HttpStatusError(code, url, retryAfter)
+
+                    val bytes = if (head) ByteArray(0) else readCapped(received)
+                    logcat(LogPriority.DEBUG) {
+                        "Takami fetch: " + request.method + " " + host + " -> " + code +
+                            " за " + (guard.now() - startedAt) + " мс"
+                    }
+                    Raw(
+                        code = code,
+                        url = received.request.url.toString(),
+                        location = received.header("Location"),
+                        contentType = received.header("Content-Type"),
+                        headers = received.headers,
+                        bytes = bytes,
+                    )
+                }
             }
+            breaker?.onSuccess(host)
+            raw
+        } catch (e: IOException) {
+            breaker?.onFailure(host, e.message)
+            throw e
         }
     }
 
@@ -469,8 +533,10 @@ class Fetcher internal constructor(
             if (instance != null) return
             synchronized(this) {
                 if (instance != null) return
-                val guard = HostGuard(budget ?: FileRequestBudget(context.applicationContext))
-                instance = Fetcher(buildClient(), guard, HttpCache(context.applicationContext))
+                val app = context.applicationContext
+                val guard = HostGuard(budget ?: FileRequestBudget(app))
+                val breaker = CircuitBreaker(File(app.filesDir, BREAKER_FILE))
+                instance = Fetcher(buildClient(), guard, HttpCache(app), breaker)
             }
         }
 
@@ -496,6 +562,8 @@ class Fetcher internal constructor(
             val host = url.toHttpUrlOrNull()?.host ?: throw InvalidUrlError(url)
             return host.lowercase().removePrefix("www.")
         }
+
+        private const val BREAKER_FILE = "takami/breaker.json"
 
         private fun keyOf(url: String, referer: String?): String =
             if (referer.isNullOrBlank()) url else url + "|" + referer

@@ -28,4 +28,6 @@ class InMemoryRequestBudget(
     override suspend fun reset() {
         counts.clear()
     }
+
+    override suspend fun hosts(): List<String> = counts.keys.sorted()
 }
