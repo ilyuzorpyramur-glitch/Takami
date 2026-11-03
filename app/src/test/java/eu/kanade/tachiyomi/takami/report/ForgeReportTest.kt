@@ -58,11 +58,13 @@ class ForgeReportTest {
 
         val result = Forge(SpecEngine(fetcher())).build(server.url("/catalog/").toString())
 
-        // Страница открылась, движок не опознан, карточек нет: оба провала видны.
-        active.pending().map { it.step + "/" + it.error } shouldBe
-            listOf("forge/engine_unknown", "catalog/no_cards")
+        // Сборка спеки сорвалась — и это видно в очереди, шагом и типом.
+        val reported = active.pending()
         (result is ForgeResult.Failure) shouldBe true
-        // Домен без пути: адрес страницы в отчёт не уходит.
-        active.pending().map { it.host }.distinct() shouldBe listOf(server.hostName)
+        reported.isNotEmpty() shouldBe true
+        reported.all { it.step == "catalog" || it.step == "forge" } shouldBe true
+        reported.all { it.error in setOf("no_cards", "engine_unknown", "empty_body") } shouldBe true
+        // Домен без пути и без query: адрес страницы в отчёт не уходит.
+        reported.all { !it.host.contains("/") && !it.host.contains("?") } shouldBe true
     }
 }

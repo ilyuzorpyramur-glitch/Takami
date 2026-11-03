@@ -58,10 +58,9 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
 
         if (card == null) {
             ParseFailures.noteFailure(host, "catalog", "no_cards")
-            return@withContext ForgeResult.Failure(
-                "Не нашёл карточки тайтлов на главной: сайт отдаёт разметку, которую я пока не разбираю " +
-                    "(проверил " + candidates.size + " вариантов)",
-            )
+            val reason = "Не нашёл карточки тайтлов на главной: сайт отдаёт разметку, " +
+                "которую я пока не разбираю (проверил " + candidates.size + " вариантов)"
+            return@withContext ForgeResult.Failure(reason)
         }
         val chosen: CardChoice = card
 
@@ -283,7 +282,8 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         val probe = draftSpec(baseUrl, "probe", CardChoice(".x", "a", null, null), path, SiteSpec.ENGINE_GENERIC)
         val pageUrl = engine.pageUrl(baseUrl, path, pagination, 2)
         val html = runCatching { engine.fetch(pageUrl) }.getOrNull() ?: return PaginationSpec("none", "")
-        val parsed = runCatching { engine.parseCatalogue(probe.copy(catalog = probe.catalog.copy(itemSelector = lastCardSelector)), html, pageUrl) }
+        val items = probe.catalog.copy(itemSelector = lastCardSelector)
+        val parsed = runCatching { engine.parseCatalogue(probe.copy(catalog = items), html, pageUrl) }
             .getOrNull() ?: return PaginationSpec("none", "")
         val differs = parsed.first.isNotEmpty() && parsed.first.firstOrNull()?.url != firstUrl
         return if (differs) pagination else PaginationSpec("none", "")
