@@ -10,6 +10,9 @@ const val REPORT_QUEUE_MAX_EVENTS = 500
 /** Сколько занимает очередь на диске. */
 const val REPORT_QUEUE_MAX_BYTES = 512 * 1024
 
+/** Окно, внутри которого одинаковые сбои считаются одним событием. */
+const val REPORT_REPEAT_WINDOW_MS = 10L * 60L * 1_000L
+
 /**
  * Очередь отчётов на диске.
  *
@@ -23,11 +26,30 @@ class ReportQueue(private val dir: File?) {
 
     fun size(): Int = read().size
 
-    /** Добавляет событие, вытесняя старое при переполнении. */
+    /**
+     * Добавляет событие, вытесняя старое при переполнении.
+     *
+     * Тот же домен, шаг и тип за десять минут — не новое событие, а счётчик
+     * у уже записанного: иначе один сломанный сайт вытеснил бы из очереди
+     * все остальные. Окно считается от первого сбоя серии.
+     */
     fun add(event: ReportEvent) {
-        val next = (read() + event).takeLast(REPORT_QUEUE_MAX_EVENTS)
-        write(trimBySize(next))
+        val current = read()
+        val repeat = current.indexOfLast { it.sameKind(event) && withinWindow(it, event) }
+        if (repeat >= 0) {
+            val merged = current.toMutableList()
+            merged[repeat] = merged[repeat].copy(count = merged[repeat].count + 1)
+            write(trimBySize(merged))
+            return
+        }
+        write(trimBySize((current + event).takeLast(REPORT_QUEUE_MAX_EVENTS)))
     }
+
+    private fun ReportEvent.sameKind(fresh: ReportEvent): Boolean =
+        host == fresh.host && step == fresh.step && error == fresh.error
+
+    private fun withinWindow(recorded: ReportEvent, fresh: ReportEvent): Boolean =
+        fresh.at - recorded.at in 0..REPORT_REPEAT_WINDOW_MS
 
     /** Первые события очереди, без удаления: отправка может не удаться. */
     fun peek(count: Int): List<ReportEvent> = read().take(count)

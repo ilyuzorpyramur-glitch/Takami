@@ -30,6 +30,14 @@ object TakamiReports {
     @Volatile
     private var dir: File? = null
 
+    /** Цикл сбора: в нём же живёт внеочередной толчок после сбоя. */
+    @Volatile
+    private var scope: CoroutineScope? = null
+
+    /** Толчок не накладывается сам на себя: на время попытки он один. */
+    @Volatile
+    private var flushJob: Job? = null
+
     /** Готовит отправку. Без адреса в сборке она просто ничего не делает. */
     fun start(context: Context) {
         if (reporter != null) return
@@ -48,14 +56,25 @@ object TakamiReports {
             logcat(LogPriority.DEBUG) {
                 "Takami: сбор отчётов — " + if (endpoint.isBlank()) "адрес не задан" else "включён"
             }
-            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-            scope.launch {
+            val worker = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            scope = worker
+            // Провалы разбора идут в тот же сбор, что и сетевые.
+            installParseSink(active) { installId() }
+            worker.launch {
                 while (true) {
                     runCatching { active.sendIfDue() }
                     delay(TICK_MS)
                 }
             }
         }
+    }
+
+    /** Разбор сломался: повод попробовать отправить, не дожидаясь часа. */
+    private fun kick() {
+        val active = reporter ?: return
+        val worker = scope ?: return
+        if (flushJob?.isActive == true) return
+        flushJob = worker.launch { runCatching { active.flushSoon() } }
     }
 
     /** Сбой сетевого шага: тип ошибки и шаг, без текстов и адресов. */
@@ -86,6 +105,7 @@ object TakamiReports {
                     at = System.currentTimeMillis(),
                 ),
             )
+            kick()
         }
     }
 

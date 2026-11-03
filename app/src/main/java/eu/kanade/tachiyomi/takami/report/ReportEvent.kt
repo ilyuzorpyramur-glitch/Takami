@@ -17,6 +17,8 @@ data class ReportEvent(
     val step: String,
     /** Тип ошибки, а не текст: тексты содержат адреса. */
     val error: String,
+    /** Сколько раз этот же сбой повторился внутри окна. */
+    val count: Int = 1,
     /** Состояние источника после сбоя. */
     val health: String = "unknown",
     val code: Int? = null,

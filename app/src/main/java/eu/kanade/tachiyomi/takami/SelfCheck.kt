@@ -34,15 +34,18 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
 
         val (animes, hasNext) = runCatching { engine.catalogue(spec, 1) }
             .getOrElse {
+                ParseFailures.noteFailure(spec.host, "catalog", "empty_body", spec.version)
                 return@withContext SelfCheckReport(
                     listOf(CheckResult("catalog", "Каталог", false, it.message.orEmpty())),
                 )
             }
 
+        val catalogOk = animes.size >= MIN_CATALOG
+        if (!catalogOk) ParseFailures.noteFailure(spec.host, "catalog", "no_cards", spec.version)
         results += CheckResult(
             key = "catalog",
             title = "Каталог",
-            ok = animes.size >= MIN_CATALOG,
+            ok = catalogOk,
             note = animes.size.toString() + " тайтлов",
         )
         if (animes.isEmpty()) return@withContext SelfCheckReport(results)
@@ -79,18 +82,24 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
             }
         }
 
+        val detailsOk = details != null && details.title.isNotBlank() &&
+            !details.thumbnail_url.isNullOrBlank()
+        if (!detailsOk) ParseFailures.noteFailure(spec.host, "details", "empty_body", spec.version)
         results += CheckResult(
             key = "details",
             title = "Карточка тайтла",
-            ok = details != null && details.title.isNotBlank() &&
-                !details.thumbnail_url.isNullOrBlank(),
+            ok = detailsOk,
             note = details?.title?.take(40).orEmpty(),
         )
 
+        val episodesOk = episodes.isNotEmpty()
+        if (!episodesOk) {
+            ParseFailures.noteFailure(spec.host, "episodes", "no_episodes", spec.version)
+        }
         results += CheckResult(
             key = "episodes",
             title = "Серии",
-            ok = episodes.isNotEmpty(),
+            ok = episodesOk,
             note = episodes.size.toString() + " шт.",
         )
 
@@ -100,10 +109,15 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
             qualities = videos.map { it.quality }.filter { it.isNotBlank() }.distinct()
             val playable = videos.firstOrNull()
             val media = playable != null && looksLikeMedia(engine.probe(playable.videoUrl, episode.url))
+            val videoOk = videos.isNotEmpty() && media
+            if (!videoOk) {
+                val error = if (videos.isEmpty()) "no_links" else "no_video"
+                ParseFailures.noteFailure(spec.host, "video", error, spec.version)
+            }
             results += CheckResult(
                 key = "video",
                 title = "Видео",
-                ok = videos.isNotEmpty() && media,
+                ok = videoOk,
                 note = when {
                     videos.isEmpty() -> "ссылок нет"
                     !media -> "ссылка не отдаёт поток"

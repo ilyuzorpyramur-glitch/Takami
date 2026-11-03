@@ -28,15 +28,26 @@ class SpecEngine(
 
     suspend fun catalogue(spec: SiteSpec, page: Int): Pair<List<SAnime>, Boolean> {
         val url = pageUrl(spec.baseUrl, spec.catalog.path, spec.catalog.pagination, page)
-        val page = fetchPage(url)
-        return parseCatalogue(spec, page.html, page.url)
+        val loaded = fetchPage(url)
+        return reportCatalogue(spec, parseCatalogue(spec, loaded.html, loaded.url))
     }
 
     suspend fun latest(spec: SiteSpec, page: Int): Pair<List<SAnime>, Boolean> {
         val path = spec.catalog.latestPath ?: spec.catalog.path
         val url = pageUrl(spec.baseUrl, path, spec.catalog.pagination, page)
-        val page = fetchPage(url)
-        return parseCatalogue(spec, page.html, page.url)
+        val loaded = fetchPage(url)
+        return reportCatalogue(spec, parseCatalogue(spec, loaded.html, loaded.url))
+    }
+
+    /** Пустой каталог — это провал разбора, а не пустой источник. */
+    private fun reportCatalogue(
+        spec: SiteSpec,
+        parsed: Pair<List<SAnime>, Boolean>,
+    ): Pair<List<SAnime>, Boolean> {
+        if (parsed.first.isEmpty()) {
+            ParseFailures.noteFailure(spec.host, "catalog", "no_cards", spec.version)
+        }
+        return parsed
     }
 
     suspend fun search(spec: SiteSpec, page: Int, query: String): Pair<List<SAnime>, Boolean> {
@@ -91,7 +102,7 @@ class SpecEngine(
         val doc = Jsoup.parse(animePage.html, animePage.url)
         val d = spec.details
 
-        return SAnime.create().apply {
+        val result = SAnime.create().apply {
             url = anime.url
             title = text(doc, d.title).ifBlank { anime.title }
             thumbnail_url = attr(doc, d.poster).ifBlank { anime.thumbnail_url.orEmpty() }
@@ -100,6 +111,12 @@ class SpecEngine(
             status = statusOf(text(doc, d.status))
             initialized = true
         }
+
+        // Ни названия, ни постера: карточка открылась, но разбирать нечего.
+        if (result.title.isBlank() && result.thumbnail_url.isNullOrBlank()) {
+            ParseFailures.noteFailure(spec.host, "details", "empty_body", spec.version)
+        }
+        return result
     }
 
     suspend fun episodes(spec: SiteSpec, anime: SAnime): List<SEpisode> {
@@ -114,7 +131,7 @@ class SpecEngine(
                 " nodes=" + nodes.size + " url=" + anime.url
         }
 
-        return nodes
+        val parsed = nodes
             .mapIndexedNotNull { index, item ->
                 val link = e.linkSelector
                     ?.let { sel -> item.selectFirst(sel) }
@@ -159,6 +176,11 @@ class SpecEngine(
             }
             .distinctBy { it.episode_number }
             .sortedByDescending { it.episode_number }
+
+        if (parsed.isEmpty()) {
+            ParseFailures.noteFailure(spec.host, "episodes", "no_episodes", spec.version)
+        }
+        return parsed
     }
 
     suspend fun videos(spec: SiteSpec, episode: SEpisode): List<Video> {
@@ -212,6 +234,10 @@ class SpecEngine(
         val videos = links.map { (url, label) ->
             val quality = normalizeQuality(label).ifBlank { qualityOf(url) }
             Video(url, quality, url)
+        }
+
+        if (videos.isEmpty()) {
+            ParseFailures.noteFailure(spec.host, "video", "no_links", spec.version)
         }
 
         return when (spec.qualityPreference) {

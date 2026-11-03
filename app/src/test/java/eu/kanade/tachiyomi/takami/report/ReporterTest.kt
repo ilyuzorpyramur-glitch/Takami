@@ -39,13 +39,14 @@ class ReporterTest {
         },
     )
 
+    /** События разные: иначе одинаковые сбои сложились бы в счётчик. */
     private fun fill(reporter: Reporter, count: Int) {
         repeat(count) { index ->
             reporter.note(
                 ReportEvent(
                     host = "site.example",
                     step = "catalog",
-                    error = "network",
+                    error = "network" + index,
                     at = index.toLong(),
                 ),
             )
@@ -144,6 +145,72 @@ class ReporterTest {
         reporter.sendIfDue(justBeforeEnd) shouldBe SendOutcome.LIMIT_REACHED
         calls shouldBe 0
         reporter.queueSize() shouldBe 5
+    }
+
+    @Test
+    fun `толчок после сбоя срабатывает не чаще раза в десять минут`(): Unit = runBlocking {
+        val reporter = reporter()
+        fill(reporter, 2)
+
+        reporter.flushSoon(justBeforeEnd) shouldBe SendOutcome.SENT
+        calls shouldBe 1
+
+        fill(reporter, 2)
+        // Через минуту толчок ещё не положен.
+        reporter.flushSoon(justBeforeEnd + 60_000L) shouldBe SendOutcome.NOT_DUE
+        calls shouldBe 1
+        // А через десять минут — снова можно.
+        reporter.flushSoon(justBeforeEnd + REPORT_FLUSH_INTERVAL_MS) shouldBe SendOutcome.SENT
+        calls shouldBe 2
+    }
+
+    @Test
+    fun `толчок слушается предела и срока`(): Unit = runBlocking {
+        dir.mkdirs()
+        File(dir, "report-state.json").writeText(
+            "{\"enabled\":true,\"lastSentAt\":0,\"totalSent\":" + MAX_TOTAL_REPORTS + "}",
+        )
+        val limited = reporter()
+        fill(limited, 2)
+
+        limited.flushSoon(justBeforeEnd) shouldBe SendOutcome.LIMIT_REACHED
+        calls shouldBe 0
+
+        val expired = reporter(now = afterEnd)
+        fill(expired, 2)
+        expired.flushSoon(afterEnd) shouldBe SendOutcome.EXPIRED
+        calls shouldBe 0
+    }
+
+    @Test
+    fun `после срока калибровки событие не пишется`(): Unit = runBlocking {
+        val reporter = reporter(now = afterEnd)
+
+        reporter.note(ReportEvent(host = "site.example", step = "video", error = "no_video", at = 1L))
+
+        reporter.queueSize() shouldBe 0
+        reporter.sendIfDue(afterEnd) shouldBe SendOutcome.EXPIRED
+        calls shouldBe 0
+    }
+
+    @Test
+    fun `запись события подталкивает отправку и складывает повторы`() {
+        var kicks = 0
+        val active = Reporter(
+            dir = dir,
+            endpoint = "https://collector.example/ingest",
+            appVersion = "0.1",
+            token = "signature",
+            send = { _, _, _ -> },
+            onQueued = { kicks++ },
+        )
+
+        repeat(3) { active.note(ReportEvent(host = "site.example", step = "video", error = "no_links", at = 5L)) }
+
+        // Толчок просят на каждую запись, а событие в очереди одно.
+        kicks shouldBe 3
+        active.queueSize() shouldBe 1
+        active.pending().single().count shouldBe 3
     }
 
     @Test

@@ -18,7 +18,8 @@ class ReportQueueTest {
         return ReportEvent(
             host = "site.example",
             step = "catalog",
-            error = "network",
+            // Разные типы, иначе повторы сложатся в счётчик одного события.
+            error = "network" + counter,
             health = "healthy",
             at = counter.toLong(),
         )
@@ -76,6 +77,36 @@ class ReportQueueTest {
 
         queue.size() shouldBe 1
         queue.all().first().at shouldBe 3L
+    }
+
+    @Test
+    fun `повтор внутри десяти минут складывается в счётчик`() {
+        val queue = ReportQueue(dir)
+        val first = ReportEvent(host = "site.example", step = "episodes", error = "no_episodes", at = 1_000L)
+
+        queue.add(first)
+        queue.add(first.copy(at = 1_000L + 60_000L))
+        queue.add(first.copy(at = 1_000L + REPORT_REPEAT_WINDOW_MS))
+
+        queue.size() shouldBe 1
+        queue.all().single().count shouldBe 3
+        // Окно считается от первого сбоя: время не сдвигается.
+        queue.all().single().at shouldBe 1_000L
+    }
+
+    @Test
+    fun `разные шаги и поздние повторы остаются разными событиями`() {
+        val queue = ReportQueue(dir)
+        val first = ReportEvent(host = "site.example", step = "episodes", error = "no_episodes", at = 1_000L)
+
+        queue.add(first)
+        queue.add(first.copy(step = "video"))
+        queue.add(first.copy(error = "no_links"))
+        // Тот же сбой, но окно уже прошло — это уже другое событие.
+        queue.add(first.copy(at = 1_000L + REPORT_REPEAT_WINDOW_MS + 1L))
+
+        queue.size() shouldBe 4
+        queue.all().none { it.count > 1 } shouldBe true
     }
 
     @Test

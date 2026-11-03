@@ -23,9 +23,21 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         val host = url.substringAfter("://").substringBefore('/').removePrefix("www.")
         val baseUrl = url.substringBefore("://") + "://" + url.substringAfter("://").substringBefore('/')
 
-        val html = engine.fetch(url)
+        val html = runCatching { engine.fetch(url) }.getOrElse {
+            ParseFailures.noteFailure(host, "forge", "empty_body")
+            return@withContext ForgeResult.Failure("Страница не загрузилась")
+        }
+        if (html.isBlank()) {
+            ParseFailures.noteFailure(host, "forge", "empty_body")
+            return@withContext ForgeResult.Failure("Страница пришла пустой")
+        }
         val doc = Jsoup.parse(html, url)
         val detected = detectEngine(html)
+        // Ни одного признака движка: селекторы подбираются наугад, и это
+        // стоит видеть в калибровке наравне с провалом.
+        if (detected == SiteSpec.ENGINE_GENERIC) {
+            ParseFailures.noteFailure(host, "forge", "engine_unknown")
+        }
         val candidates = reachableCards(doc)
         var card: CardChoice? = null
         var sample: List<eu.kanade.tachiyomi.animesource.model.SAnime> = emptyList()
@@ -44,10 +56,14 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         lastCardSelector = card?.selector ?: "article"
         lastCardChoice = card
 
-        val chosen = card ?: return@withContext ForgeResult.Failure(
-            "Не нашёл карточки тайтлов на главной: сайт отдаёт разметку, которую я пока не разбираю " +
-                "(проверил " + candidates.size + " вариантов)",
-        )
+        if (card == null) {
+            ParseFailures.noteFailure(host, "catalog", "no_cards")
+            return@withContext ForgeResult.Failure(
+                "Не нашёл карточки тайтлов на главной: сайт отдаёт разметку, которую я пока не разбираю " +
+                    "(проверил " + candidates.size + " вариантов)",
+            )
+        }
+        val chosen: CardChoice = card
 
         val title = siteName(doc, host)
         val basePath = pathOf(url)

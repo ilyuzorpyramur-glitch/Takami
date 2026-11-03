@@ -20,6 +20,9 @@ const val REPORT_BATCH_SIZE = 20
 /** Как часто пробуем отправить: не чаще раза в час. */
 const val REPORT_INTERVAL_MS = 60L * 60L * 1_000L
 
+/** Как часто может срабатывать толчок после сбоя. */
+const val REPORT_FLUSH_INTERVAL_MS = 10L * 60L * 1_000L
+
 /** Сколько отчётов отправляем за всё время калибровки. */
 const val MAX_TOTAL_REPORTS = 2_000
 
@@ -40,7 +43,7 @@ enum class SendOutcome {
     /** Общий предел отправленных отчётов достигнут. */
     LIMIT_REACHED,
 
-    /** Час ещё не прошёл. */
+    /** Срок между попытками ещё не прошёл. */
     NOT_DUE,
 
     /** Отправлять нечего. */
@@ -58,6 +61,8 @@ data class ReporterState(
     val enabled: Boolean = true,
     val lastSentAt: Long = 0L,
     val totalSent: Int = 0,
+    /** Когда срабатывал внеочередной толчок: он реже часа, но чаще раза в 10 минут. */
+    val lastFlushAt: Long = 0L,
 )
 
 /**
@@ -81,12 +86,22 @@ class Reporter(
         Fetcher.get().postReport(url, body, signature)
     },
     private val clock: () -> Long = { System.currentTimeMillis() },
+    // Толчок отправки после записи события: запуск живёт там, где есть цикл,
+    // а сроки и пределы остаются здесь.
+    private val onQueued: (() -> Unit)? = null,
 ) {
     private val queue = ReportQueue(dir)
 
+    /** Записывает событие. После срока калибровки не пишет ничего. */
     fun note(event: ReportEvent) {
+        if (clock() >= CALIBRATION_UNTIL) return
         queue.add(event)
+        // Свежий сбой — повод отправить сразу, а не ждать часа.
+        onQueued?.invoke()
     }
+
+    /** Что сейчас лежит в очереди. Нужно только для проверок и состояния. */
+    fun pending(): List<ReportEvent> = queue.all()
 
     fun queueSize(): Int = queue.size()
 
@@ -130,14 +145,41 @@ class Reporter(
             return SendOutcome.NOT_DUE
         }
 
+        return attempt(now)
+    }
+
+    /**
+     * Внеочередная отправка после сбоя.
+     *
+     * Калибровке нужны свежие данные, но не ценой лишних запросов: не чаще
+     * раза в десять минут, и только пока идёт срок и не исчерпан предел.
+     * Очередь здесь не чистится: после срока это делает плановая отправка.
+     */
+    suspend fun flushSoon(now: Long = clock()): SendOutcome {
+        if (now >= CALIBRATION_UNTIL) return SendOutcome.EXPIRED
+        if (endpoint.isBlank()) return SendOutcome.NO_ENDPOINT
+        if (token.isEmpty()) return SendOutcome.NO_SIGNATURE
+        val state = readState()
+        if (!state.enabled) return SendOutcome.DISABLED
+        if (state.totalSent >= MAX_TOTAL_REPORTS) return SendOutcome.LIMIT_REACHED
+        if (state.lastFlushAt != 0L && now - state.lastFlushAt < REPORT_FLUSH_INTERVAL_MS) {
+            return SendOutcome.NOT_DUE
+        }
+        writeState(state.copy(lastFlushAt = now))
+        return attempt(now)
+    }
+
+    /** Общая часть обеих отправок: пачка, запрос и запись состояния. */
+    private suspend fun attempt(now: Long): SendOutcome {
         val batch = queue.peek(REPORT_BATCH_SIZE)
         if (batch.isEmpty()) return SendOutcome.EMPTY
 
+        val state = readState()
         val body = encodeBody(batch)
         val delivered = runCatching { send(endpoint, body, token) }.isSuccess
         // Время фиксируем в любом случае: иначе при недоступном приёмнике
         // попытки пошли бы подряд.
-        val sent = if (delivered) {
+        val next = if (delivered) {
             queue.remove(batch)
             state.copy(
                 lastSentAt = now,
@@ -146,7 +188,7 @@ class Reporter(
         } else {
             state.copy(lastSentAt = now)
         }
-        writeState(sent)
+        writeState(next)
         return if (delivered) SendOutcome.SENT else SendOutcome.FAILED
     }
 
