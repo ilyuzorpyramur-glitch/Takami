@@ -155,7 +155,7 @@ class ChallengeTest {
         assertFailsWith<VerificationRequiredError> {
             fetcher.get(server.url("/catalog").toString())
         }
-        registry.status(server.hostName) shouldBe null
+        registry.status(server.hostName)?.level shouldBe ProtectionLevel.BLOCKED
 
         fetcher.clearVerification(server.hostName)
 

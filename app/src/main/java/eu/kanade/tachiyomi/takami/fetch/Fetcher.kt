@@ -432,10 +432,14 @@ class Fetcher internal constructor(
         // Домен в паузе: ни одного запроса, даже пробного.
         if (breaker?.allow(host) == false) throw BreakerOpenError(host)
 
+        // Пробный запрос после паузы: его неудача снова закрывает домен,
+        // и повтор внутри той же операции уже не имеет смысла.
+        val probing = breaker?.state(host)?.state == BreakerState.HALF_OPEN
         val first = try {
             sendOnce(url, referer, priority, head, post, headers, host)
         } catch (e: IOException) {
             breaker?.onFailure(host, e.message)
+            if (probing && breaker?.allow(host) == false) throw BreakerOpenError(host)
             throw e
         }
         breaker?.onSuccess(host)
