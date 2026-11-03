@@ -36,6 +36,7 @@ import com.tadami.aurora.BuildConfig
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.takami.fetch.BreakerState
 import eu.kanade.tachiyomi.takami.fetch.HostReport
+import eu.kanade.tachiyomi.takami.fetch.VerificationStatus
 import eu.kanade.tachiyomi.takami.fetch.NetworkDiagnostics
 import kotlinx.coroutines.launch
 
@@ -57,9 +58,11 @@ class DiagnosticsScreen : Screen() {
         val scope = rememberCoroutineScope()
         var reports by remember { mutableStateOf<List<HostReport>>(emptyList()) }
         var loaded by remember { mutableStateOf(false) }
+        var waiting by remember { mutableStateOf<List<VerificationStatus>>(emptyList()) }
 
         suspend fun reload() {
             reports = NetworkDiagnostics.report()
+            waiting = NetworkDiagnostics.verifications()
             loaded = true
         }
 
@@ -108,6 +111,30 @@ class DiagnosticsScreen : Screen() {
 
                 reports.forEach { report ->
                     HostCard(report = report)
+                }
+
+                if (waiting.isNotEmpty()) {
+                    Text(
+                        text = "Сайты, которые ждут проверки",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    waiting.forEach { status ->
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text(text = status.host, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    text = status.reason,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                OutlinedButton(
+                                    modifier = Modifier.padding(top = 6.dp),
+                                    onClick = { navigator.push(VerificationScreen(status.host)) },
+                                ) {
+                                    Text("Открыть окно проверки")
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if (BuildConfig.DEBUG) {

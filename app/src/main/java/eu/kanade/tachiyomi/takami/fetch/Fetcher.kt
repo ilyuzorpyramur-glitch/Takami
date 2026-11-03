@@ -1,6 +1,33 @@
 package eu.kanade.tachiyomi.takami.fetch
 
 import android.content.Context
+import eu.kanade.tachiyomi.network.NetworkPreferences
+import eu.kanade.tachiyomi.network.PREF_DOH_360
+import eu.kanade.tachiyomi.network.PREF_DOH_ADGUARD
+import eu.kanade.tachiyomi.network.PREF_DOH_ALIDNS
+import eu.kanade.tachiyomi.network.PREF_DOH_CLOUDFLARE
+import eu.kanade.tachiyomi.network.PREF_DOH_CONTROLD
+import eu.kanade.tachiyomi.network.PREF_DOH_DNSPOD
+import eu.kanade.tachiyomi.network.PREF_DOH_GOOGLE
+import eu.kanade.tachiyomi.network.PREF_DOH_LIBREDNS
+import eu.kanade.tachiyomi.network.PREF_DOH_MULLVAD
+import eu.kanade.tachiyomi.network.PREF_DOH_NJALLA
+import eu.kanade.tachiyomi.network.PREF_DOH_QUAD101
+import eu.kanade.tachiyomi.network.PREF_DOH_QUAD9
+import eu.kanade.tachiyomi.network.PREF_DOH_SHECAN
+import eu.kanade.tachiyomi.network.doh360
+import eu.kanade.tachiyomi.network.dohAdGuard
+import eu.kanade.tachiyomi.network.dohAliDNS
+import eu.kanade.tachiyomi.network.dohCloudflare
+import eu.kanade.tachiyomi.network.dohControlD
+import eu.kanade.tachiyomi.network.dohDNSPod
+import eu.kanade.tachiyomi.network.dohGoogle
+import eu.kanade.tachiyomi.network.dohLibreDNS
+import eu.kanade.tachiyomi.network.dohMullvad
+import eu.kanade.tachiyomi.network.dohNajalla
+import eu.kanade.tachiyomi.network.dohQuad101
+import eu.kanade.tachiyomi.network.dohQuad9
+import eu.kanade.tachiyomi.network.dohShecan
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +55,8 @@ import java.io.File
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 /**
  * Краткий ответ на HEAD: код, итоговый адрес и заголовки. Тела здесь
@@ -72,6 +101,8 @@ class Fetcher internal constructor(
     private val guard: HostGuard,
     private val cache: HttpCache? = null,
     private val breaker: CircuitBreaker? = null,
+    private val challenges: ChallengeBrowser? = null,
+    private val protection: ProtectionRegistry = ProtectionRegistry(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val inFlight = ConcurrentHashMap<String, CompletableDeferred<FetchedPage>>()
@@ -261,6 +292,31 @@ class Fetcher internal constructor(
         }
     }
 
+    /** Требует ли сайт проверки человеком и какого уровня. */
+    fun verification(host: String): VerificationStatus? = protection.status(host)
+
+    /** Все сайты, которые ждут проверки. */
+    fun verifications(): List<VerificationStatus> = protection.all()
+
+    /** Человек прошёл проверку: снимаем пометку. */
+    fun clearVerification(host: String) = protection.clear(host)
+
+    /**
+     * Забирает cookie из видимого окна проверки в общий jar.
+     *
+     * Так следующий запрос идёт уже с cookie, которую поставил сайт после
+     * проверки человеком.
+     */
+    fun acceptCookies(url: String, host: String) {
+        val header = runCatching {
+            android.webkit.CookieManager.getInstance().getCookie(url)
+        }.getOrNull().orEmpty()
+        val base = url.toHttpUrlOrNull()
+        val parsed = if (base == null) emptyList() else ChallengeCookies.parse(host, header)
+        if (parsed.isNotEmpty() && base != null) client.cookieJar.saveFromResponse(base, parsed)
+        protection.clear(host)
+    }
+
     /**
      * Сброс дневных счётчиков: кнопка в диагностике, только для
      * отладочной сборки.
@@ -282,6 +338,7 @@ class Fetcher internal constructor(
         var current = url
         var ref = referer
         var hops = 0
+        var browserPassed = false
         while (true) {
             // Условные заголовки относятся к исходному адресу: после
             // перехода
@@ -302,7 +359,18 @@ class Fetcher internal constructor(
                         lastModified = lastModified,
                     )
                 }
-                val gated = ResponseGate.check(raw.contentType, raw.bytes, raw.url)
+                val gated: GatedPage
+                try {
+                    gated = ResponseGate.check(raw.contentType, raw.bytes, raw.url)
+                } catch (e: ChallengePageError) {
+                    // Заглушка без явных заголовков: браузер пробуем один раз.
+                    val host = hostOf(current)
+                    if (browserPassed || passBrowser(raw.url, host) == null) {
+                        refuse(host, raw.url, ProtectionLevel.CAPTCHA, "проверка браузера не пройдена")
+                    }
+                    browserPassed = true
+                    continue
+                }
                 val page = FetchedPage(
                     html = gated.html,
                     url = raw.url,
@@ -361,49 +429,132 @@ class Fetcher internal constructor(
     ): Raw {
         currentCoroutineContext().ensureActive()
         val host = hostOf(url)
-        val startedAt = guard.now()
         // Домен в паузе: ни одного запроса, даже пробного.
         if (breaker?.allow(host) == false) throw BreakerOpenError(host)
 
-        return try {
-            val raw = guard.run(host, priority) {
-                // Пока ждали слот и интервал, экран могли закрыть.
-                currentCoroutineContext().ensureActive()
-                val builder = request(url, referer)
-                headers.forEach { (name, value) -> builder.header(name, value) }
-                val request = when {
-                    head -> builder.head().build()
-                    post != null -> builder.post(post.toRequestBody(htmlMediaType)).build()
-                    else -> builder.get().build()
-                }
-                val response = execute(request, host)
-                response.use { received ->
-                    val code = received.code
-                    val retryAfter = if (code == HTTP_TOO_MANY_REQUESTS) retryAfterMs(received) else null
-                    if (retryAfter != null) guard.retryAfter(host, retryAfter)
-                    if (code !in 200..399) throw HttpStatusError(code, url, retryAfter)
-
-                    val bytes = if (head) ByteArray(0) else readCapped(received)
-                    logcat(LogPriority.DEBUG) {
-                        "Takami fetch: " + request.method + " " + host + " -> " + code +
-                            " за " + (guard.now() - startedAt) + " мс"
-                    }
-                    Raw(
-                        code = code,
-                        url = received.request.url.toString(),
-                        location = received.header("Location"),
-                        contentType = received.header("Content-Type"),
-                        headers = received.headers,
-                        bytes = bytes,
-                    )
-                }
-            }
-            breaker?.onSuccess(host)
-            raw
+        val first = try {
+            sendOnce(url, referer, priority, head, post, headers, host)
         } catch (e: IOException) {
             breaker?.onFailure(host, e.message)
             throw e
         }
+        breaker?.onSuccess(host)
+        if (first.protection.passed) return first
+
+        // Уровень A: настоящий браузер проходит проверку сам. Повтор — один.
+        if (first.protection.level == ProtectionLevel.BROWSER_CHECK) {
+            if (passBrowser(first.url, host) != null) {
+                val again = try {
+                    sendOnce(url, referer, priority, head, post, headers, host)
+                } catch (e: IOException) {
+                    breaker?.onFailure(host, e.message)
+                    throw e
+                }
+                breaker?.onSuccess(host)
+                if (again.protection.passed) return again
+                refuse(host, again.url, ProtectionLevel.CAPTCHA, again.protection.reason)
+            }
+            // Не прошли — дальше это уже уровень B: нужен человек.
+            refuse(host, first.url, ProtectionLevel.CAPTCHA, "проверка браузера не пройдена")
+        }
+        if (first.protection.level == ProtectionLevel.CAPTCHA) {
+            refuse(host, first.url, ProtectionLevel.CAPTCHA, first.protection.reason)
+        }
+        // Уровень C: отказ. Повторов нет, сайт помечается и ждёт человека.
+        refuse(host, first.url, ProtectionLevel.BLOCKED, first.protection.reason)
+    }
+
+    /**
+     * Один проход к сайту: без повторов и без разбора защиты.
+     *
+     * Возвращает ответ вместе с вердиктом о защите; решают, что с ним делать,
+     * выше — иначе повтор внутри повтора обходил бы и лимиты, и запрет на
+     * «ещё одну попытку на удачу».
+     */
+    private suspend fun sendOnce(
+        url: String,
+        referer: String?,
+        priority: FetchPriority,
+        head: Boolean,
+        post: String?,
+        headers: Map<String, String>,
+        host: String,
+    ): Raw = guard.run(host, priority) {
+        // Пока ждали слот и интервал, экран могли закрыть.
+        currentCoroutineContext().ensureActive()
+        val startedAt = guard.now()
+        val builder = request(url, referer)
+        headers.forEach { (name, value) -> builder.header(name, value) }
+        val request = when {
+            head -> builder.head().build()
+            post != null -> builder.post(post.toRequestBody(htmlMediaType)).build()
+            else -> builder.get().build()
+        }
+        val response = execute(request, host)
+        response.use { received ->
+            val code = received.code
+            val retryAfter = if (code == HTTP_TOO_MANY_REQUESTS) retryAfterMs(received) else null
+            val bytes = if (head) ByteArray(0) else readCapped(received)
+            val signal = if (code in 200..399) {
+                ProtectionSignal(ProtectionLevel.NONE)
+            } else {
+                Protection.of(
+                    code = code,
+                    server = received.header("Server"),
+                    mitigated = received.header("cf-mitigated"),
+                    html = bytes.toString(Charsets.UTF_8),
+                )
+            }
+            if (code !in 200..399 && signal.passed) {
+                if (retryAfter != null) guard.retryAfter(host, retryAfter)
+                throw HttpStatusError(code, url, retryAfter)
+            }
+            logcat(LogPriority.DEBUG) {
+                "Takami fetch: " + request.method + " " + host + " -> " + code +
+                    " за " + (guard.now() - startedAt) + " мс"
+            }
+            Raw(
+                code = code,
+                url = received.request.url.toString(),
+                location = received.header("Location"),
+                contentType = received.header("Content-Type"),
+                headers = received.headers,
+                bytes = bytes,
+                protection = signal,
+            )
+        }
+    }
+
+    /**
+     * Проверка браузером: скрытое окно с JS, cookie и один повтор.
+     *
+     * Возвращает строку cookie, если сайт пустил. Cookie сразу попадает в
+     * общий jar: следующие запросы идут уже с ней.
+     */
+    private suspend fun passBrowser(pageUrl: String, host: String): String? {
+        val browser = challenges ?: return null
+        val address = pageUrl.ifBlank { "https://" + host + "/" }
+        val cookie = runCatching { browser.pass(address, host) }
+            .onFailure { logcat(LogPriority.DEBUG, it) { "Takami: проверка браузера сорвалась" } }
+            .getOrNull()
+            ?: return null
+        val parsed = ChallengeCookies.parse(host, cookie)
+        val base = address.toHttpUrlOrNull()
+        if (parsed.isNotEmpty() && base != null) client.cookieJar.saveFromResponse(base, parsed)
+        protection.clear(host)
+        return cookie
+    }
+
+    /** Сайт не пустил: помечаем и прекращаем попытки. */
+    private fun refuse(
+        host: String,
+        url: String,
+        level: ProtectionLevel,
+        reason: String,
+    ): Nothing {
+        protection.mark(host, level, reason, System.currentTimeMillis())
+        logcat(LogPriority.DEBUG) { "Takami: " + host + " требует проверки — " + reason }
+        throw VerificationRequiredError(host, level, url)
     }
 
     private fun nextHop(current: String, raw: Raw, original: String): String {
@@ -471,6 +622,7 @@ class Fetcher internal constructor(
         val contentType: String?,
         val headers: Headers,
         val bytes: ByteArray,
+        val protection: ProtectionSignal = ProtectionSignal(ProtectionLevel.NONE),
     )
 
     private class Loaded(
@@ -536,26 +688,63 @@ class Fetcher internal constructor(
                 val app = context.applicationContext
                 val guard = HostGuard(budget ?: FileRequestBudget(app))
                 val breaker = CircuitBreaker(File(app.filesDir, BREAKER_FILE))
-                instance = Fetcher(buildClient(), guard, HttpCache(app), breaker)
+                instance = Fetcher(
+                    client = buildClient(currentDohProvider()),
+                    guard = guard,
+                    cache = HttpCache(app),
+                    breaker = breaker,
+                    challenges = runCatching { WebViewChallengeBrowser(app) }.getOrNull(),
+                )
             }
         }
 
         fun get(): Fetcher = instance
             ?: throw IllegalStateException("Нет Fetcher: вызовите Fetcher.init(context)")
 
-        internal fun buildClient(): OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .writeTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .connectionPool(ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_MINUTES, TimeUnit.MINUTES))
-            .cookieJar(InMemoryCookieJar())
-            .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
+        /**
+         * Собирает клиент с тем же DNS over HTTPS, что и у общего клиента
+         * приложения: при блокировке DNS виртуальные источники должны работать
+         * так же, как обычные расширения.
+         */
+        internal fun buildClient(dohProvider: Int = NO_DOH): OkHttpClient {
+            val builder = OkHttpClient.Builder()
+                .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .writeTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .connectionPool(ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_MINUTES, TimeUnit.MINUTES))
+                .cookieJar(InMemoryCookieJar())
+                .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
             // Редиректы разворачиваем сами: каждый переход —
             // отдельный запрос
             // под лимитами домена, а не бесплатный хоп внутри OkHttp.
-            .followRedirects(false)
-            .followSslRedirects(false)
-            .build()
+                .followRedirects(false)
+                .followSslRedirects(false)
+            return withDoh(builder, dohProvider).build()
+        }
+
+        /** Выбор провайдера — ровно как в общем сетевом слое приложения. */
+        internal fun withDoh(builder: OkHttpClient.Builder, provider: Int): OkHttpClient.Builder =
+            when (provider) {
+                PREF_DOH_CLOUDFLARE -> builder.dohCloudflare()
+                PREF_DOH_GOOGLE -> builder.dohGoogle()
+                PREF_DOH_ADGUARD -> builder.dohAdGuard()
+                PREF_DOH_QUAD9 -> builder.dohQuad9()
+                PREF_DOH_ALIDNS -> builder.dohAliDNS()
+                PREF_DOH_DNSPOD -> builder.dohDNSPod()
+                PREF_DOH_360 -> builder.doh360()
+                PREF_DOH_QUAD101 -> builder.dohQuad101()
+                PREF_DOH_MULLVAD -> builder.dohMullvad()
+                PREF_DOH_CONTROLD -> builder.dohControlD()
+                PREF_DOH_NJALLA -> builder.dohNajalla()
+                PREF_DOH_SHECAN -> builder.dohShecan()
+                PREF_DOH_LIBREDNS -> builder.dohLibreDNS()
+                else -> builder
+            }
+
+        /** Провайдер из настроек приложения; без настроек — системный DNS. */
+        internal fun currentDohProvider(): Int = runCatching {
+            Injekt.get<NetworkPreferences>().dohProvider().get()
+        }.getOrDefault(NO_DOH)
 
         /** Счётчики ведём по домену без www: www.site.ru и site.ru — один сайт. */
         internal fun hostOf(url: String): String {
@@ -564,6 +753,9 @@ class Fetcher internal constructor(
         }
 
         private const val BREAKER_FILE = "takami/breaker.json"
+
+        /** Провайдер не выбран: работаем через системный DNS. */
+        internal const val NO_DOH = -1
 
         private fun keyOf(url: String, referer: String?): String =
             if (referer.isNullOrBlank()) url else url + "|" + referer

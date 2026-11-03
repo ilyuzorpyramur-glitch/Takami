@@ -46,6 +46,15 @@ object FetchLimits {
     /** Пауза предохранителя: 15 минут. */
     const val BREAKER_PAUSE_MS = 15L * 60L * 1_000L
 
+    /** Сколько ждём проверку браузера: дольше человек всё равно не ждёт. */
+    const val CHALLENGE_TIMEOUT_MS = 30_000L
+
+    /** Как часто смотрим, не появилась ли cookie проверки. */
+    const val CHALLENGE_POLL_MS = 500L
+
+    /** Сколько помним, что сайт требует проверки, прежде чем попробовать снова. */
+    const val VERIFICATION_TTL_MS = 30L * 60L * 1_000L
+
     /** Бюджет запросов на одну операцию разбора или ремонта. */
     const val OPERATION_BUDGET = 3
 

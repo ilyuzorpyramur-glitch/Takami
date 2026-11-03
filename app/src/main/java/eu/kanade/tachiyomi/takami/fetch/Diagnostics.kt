@@ -26,6 +26,9 @@ data class HostReport(
 object NetworkDiagnostics {
     suspend fun report(): List<HostReport> = Fetcher.get().diagnostics()
 
+    /** Сайты, которые ждут проверки человеком. */
+    suspend fun verifications(): List<VerificationStatus> = Fetcher.get().verifications()
+
     /**
      * Сброс дневных счётчиков. Состояние предохранителя не
      * трогаем.

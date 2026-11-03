@@ -66,9 +66,24 @@ class PageTooLargeError(
  * Заглушка антибота. Повторять такой запрос нельзя: именно повтор
  * и блокирует.
  */
-class ChallengePageError(
+open class ChallengePageError(
     val url: String,
 ) : FetchError("Сайт просит проверку браузера: " + url)
+
+/**
+ * Сайт ждёт человека: капчу или подтверждение входа.
+ *
+ * Запрос не повторяется: пока проверку не прошли, каждый повтор только
+ * подтверждает сайту, что перед ним не браузер.
+ */
+class VerificationRequiredError(
+    val host: String,
+    val level: ProtectionLevel,
+    url: String,
+) : ChallengePageError(url) {
+    override val message: String
+        get() = "Сайт " + host + " требует проверки (" + level.name.lowercase() + ")"
+}
 
 /** Домен в паузе после серии ошибок: запрос не отправляем. */
 class BreakerOpenError(
