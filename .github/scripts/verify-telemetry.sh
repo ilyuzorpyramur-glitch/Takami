@@ -198,6 +198,49 @@ if [ -f "$UI/DiagnosticsScreen.kt" ]; then
 fi
 
 echo
+echo "--- режим калибровки ---"
+
+if [ -d "$TEL" ]; then
+    if grep -rqE "CALIBRATION_UNTIL|CALIBRATION_DAYS|calibrationUntil" "$TEL"; then
+        ok T38 "задан срок окончания калибровки"
+    else
+        bad T38 "нет срока окончания — сбор станет постоянным"
+    fi
+
+    if grep -rqE "CALIBRATION_UNTIL|calibrationUntil" "$TEL/Reporter.kt" 2>/dev/null; then
+        ok T39 "срок проверяется перед отправкой"
+    else
+        bad T39 "срок не проверяется в коде отправки"
+    fi
+
+    if grep -rqE "MAX_TOTAL|totalSent|TOTAL_LIMIT" "$TEL"; then
+        ok T40 "есть общий предел отправленных отчётов"
+    else
+        bad T40 "нет общего предела — поток не остановится"
+    fi
+
+    # Изоляция: снаружи пакет дергается в одном месте, иначе его не удалить целиком.
+    OUT=$(grep -rl "takami.report" --include=*.kt "$ROOT/app/src/main/java" 2>/dev/null | grep -v "/takami/report/" || true)
+    if [ "$(echo "$OUT" | grep -c . )" -le 2 ]; then
+        ok T41 "пакет отчётов изолирован ($(echo "$OUT" | grep -c . ) точек входа)"
+    else
+        bad T41 "пакет отчётов размазан по коду: $(echo "$OUT" | head -3 | tr '\n' ' ')"
+    fi
+else
+    skip T38 "пакет отчётов отсутствует"
+fi
+
+if [ -f "$UI/DiagnosticsScreen.kt" ]; then
+    if grep -qiE "калибровк|до [0-9]|срок" "$UI/DiagnosticsScreen.kt"; then
+        ok T42 "в интерфейсе указано, что сбор временный"
+    else
+        bad T42 "пользователь не видит, что сбор временный"
+    fi
+else
+    skip T42 "DiagnosticsScreen отсутствует"
+fi
+
+echo
 echo "--- приёмник ---"
 
 if [ -d "$WORKER" ]; then
