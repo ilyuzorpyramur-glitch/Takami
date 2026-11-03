@@ -23,6 +23,7 @@ bad()  { FAIL=$((FAIL + 1)); FAILED+=("$1"); printf '[%s] FAIL  %s\n' "$1" "$2";
 skip() { printf '[%s] SKIP  %s\n' "$1" "$2"; }
 
 FETCH="$ROOT/app/src/main/java/eu/kanade/tachiyomi/takami/fetch"
+TAKAMI="$ROOT/app/src/main/java/eu/kanade/tachiyomi/takami"
 TEL="$ROOT/app/src/main/java/eu/kanade/tachiyomi/takami/report"
 UI="$ROOT/app/src/main/java/eu/kanade/tachiyomi/ui/takami"
 TESTS="$ROOT/app/src/test/java/eu/kanade/tachiyomi/takami/report"
@@ -245,6 +246,53 @@ if [ -f "$W" ]; then
     fi
 else
     skip T48 "приёмник отсутствует"
+fi
+
+echo
+echo "--- сбор на провалах разбора ---"
+
+# Калибровке нужны не только сетевые сбои, но и провалы самого разбора:
+# «карточек нет», «серий нет», «видео нет». Иначе отчёты молчат там, где больно.
+FORGE="$TAKAMI/Forge.kt"
+SELF="$TAKAMI/SelfCheck.kt"
+ENGINE="$TAKAMI/SpecEngine.kt"
+
+FOUND_STEP=0
+for f in "$FORGE" "$SELF" "$ENGINE"; do
+    [ -f "$f" ] || continue
+    if grep -qE "noteFailure|TakamiReports" "$f"; then FOUND_STEP=$((FOUND_STEP + 1)); fi
+done
+if [ "$FOUND_STEP" -ge 1 ]; then
+    ok T49 "провал разбора попадает в сбор ($FOUND_STEP файлов)"
+else
+    bad T49 "разбор падает молча — в отчёты попадают только сетевые ошибки"
+fi
+
+STEPS=$(grep -rhoE '"(catalog|details|episodes|video|forge|selfcheck)"' --include=*.kt "$TAKAMI" 2>/dev/null | sort -u | wc -l)
+if [ "$STEPS" -ge 3 ]; then
+    ok T50 "шаги разбора различимы в отчёте ($STEPS)"
+else
+    bad T50 "шаги разбора не различимы — непонятно, что именно сломалось"
+fi
+
+# Именно вызов из разбора, а не определение в пакете отчётов.
+if grep -qE "noteFailure|TakamiReports\." "$FORGE" "$SELF" "$ENGINE" 2>/dev/null; then
+    ok T51 "вызов сбора есть в пути разбора"
+else
+    bad T51 "в пути разбора нет вызова сбора — определение в пакете отчётов не считается"
+fi
+
+if ls "$TESTS"/*Forge*Test*.kt "$TESTS"/*Report*Test*.kt >/dev/null 2>&1 &&    grep -rqiE "провал|failure|не нашёл|notfound" "$TESTS"/*.kt 2>/dev/null; then
+    ok T52 "есть тест на попадание провала в очередь"
+else
+    bad T52 "нет теста: провал разбора должен оказаться в очереди"
+fi
+
+# После сбоя не ждём час: нужен внеочередной толчок отправки.
+if grep -qE "flush|trigger|sendNow|kick" --include=*.kt -r "$TAKAMI/report" 2>/dev/null; then
+    ok T53 "после сбоя отправка подталкивается"
+else
+    bad T53 "после сбоя ждём час — калибровка увидит данные с задержкой"
 fi
 
 echo
