@@ -198,6 +198,56 @@ if [ -f "$UI/DiagnosticsScreen.kt" ]; then
 fi
 
 echo
+echo "--- подпись запросов ---"
+
+FETCHER="$ROOT/app/src/main/java/eu/kanade/tachiyomi/takami/fetch/Fetcher.kt"
+if [ -f "$FETCHER" ]; then
+    if grep -qE "fun postReport\(.*token" "$FETCHER"; then
+        ok T43 "слой умеет передавать подпись запроса"
+    else
+        bad T43 "postReport не принимает подпись — приёмник ответит 401 на каждый отчёт"
+    fi
+    if grep -qE "Authorization" "$FETCHER"; then
+        ok T44 "заголовок подписи действительно ставится"
+    else
+        bad T44 "заголовок Authorization не выставляется"
+    fi
+else
+    skip T43 "Fetcher.kt не найден"
+fi
+
+if grep -q "TELEMETRY_TOKEN" "$ROOT/app/build.gradle.kts" 2>/dev/null; then
+    ok T45 "подпись приходит в сборку из переменной"
+else
+    bad T45 "подписи нет в сборке — нечем подтвердить запрос"
+fi
+
+WF="$ROOT/.github/workflows/takami-debug.yml"
+if [ -f "$WF" ]; then
+    if grep -q "secrets.TELEMETRY_TOKEN" "$WF"; then
+        ok T46 "сборка получает подпись из секрета"
+    else
+        bad T46 "workflow не передаёт подпись"
+    fi
+    if grep -qE 'echo .*\$\{?(TELEMETRY_URL|TELEMETRY_TOKEN)' "$WF"; then
+        bad T47 "workflow печатает значение секрета"
+    else
+        ok T47 "значения секретов не печатаются"
+    fi
+fi
+
+W="$ROOT/telemetry-collector/src/index.js"
+if [ -f "$W" ]; then
+    if grep -qE "TELEMETRY_TOKEN" "$W" && grep -qE "401" "$W"; then
+        ok T48 "приёмник требует подпись"
+    else
+        bad T48 "приёмник принимает кого угодно"
+    fi
+else
+    skip T48 "приёмник отсутствует"
+fi
+
+echo
 echo "--- режим калибровки ---"
 
 if [ -d "$TEL" ]; then
@@ -287,10 +337,7 @@ echo
 echo "--- гигиена ---"
 
 if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
-    DEPS=$(git diff "$BASE"...HEAD -- gradle/libs.versions.toml app/build.gradle.kts 2>/dev/null \
-        | grep -E '^\+' | grep -v '^\+\+\+' \
-        | grep -iE 'implementation|libs\.|classpath|kapt|ksp|plugin' || true)
-    if [ -z "$DEPS" ]; then
+    if git diff --quiet "$BASE"...HEAD -- gradle/libs.versions.toml app/build.gradle.kts; then
         ok T35 "новых зависимостей нет"
     else
         bad T35 "изменены зависимости"
