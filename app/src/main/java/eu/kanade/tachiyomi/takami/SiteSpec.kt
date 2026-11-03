@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.takami
 
+import eu.kanade.tachiyomi.takami.spec.SPEC_VERSION
 import kotlinx.serialization.Serializable
 
 /**
@@ -29,6 +30,10 @@ data class SiteSpec(
     val video: VideoSpec = VideoSpec(),
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
+    /** Версия схемы, на которой записана спека. Файл без неё — первая версия. */
+    val version: Int = SPEC_VERSION,
+    /** Сколько проверок источника прошло при последней сборке спеки. */
+    val checksPassed: Int = 0,
 ) {
     val sourceId: Long
         get() = TakamiForge.sourceIdOf(host)

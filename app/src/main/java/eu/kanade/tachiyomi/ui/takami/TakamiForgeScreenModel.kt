@@ -88,8 +88,10 @@ class TakamiForgeScreenModel(
                 iconPath = iconPath ?: ready.spec.iconPath,
                 qualityPreference = quality,
                 dubbings = dubbings,
+                checksPassed = ready.checks.count { it.ok },
             )
-            val saved = TakamiForge.save(chosen)
+            val failed = ready.checks.filterNot { it.ok }.map { it.title }
+            val saved = TakamiForge.save(chosen, failed)
             _saved.value = TakamiForge.specs.value
             _events.send(ForgeEvent.Saved(saved.name))
             _state.value = ForgeState.Idle

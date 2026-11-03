@@ -10,17 +10,21 @@ import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.takami.fetch.Fetcher
+import eu.kanade.tachiyomi.takami.spec.SPEC_VERSION
+import eu.kanade.tachiyomi.takami.spec.SpecHistory
+import eu.kanade.tachiyomi.takami.spec.SpecJournal
+import eu.kanade.tachiyomi.takami.spec.SpecMigration
+import eu.kanade.tachiyomi.takami.spec.SpecRollback
+import eu.kanade.tachiyomi.takami.spec.stamped
+import eu.kanade.tachiyomi.takami.spec.writeAtomically
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.decodeFromString
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import java.io.File
@@ -125,12 +129,6 @@ object TakamiForge {
     private const val FILE = "sources.json"
     private const val ID_BASE = 0x7A_0000_0000L
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        prettyPrint = true
-        encodeDefaults = true
-    }
-
     private var dir: File? = null
     private val _specs = MutableStateFlow<List<SiteSpec>>(emptyList())
     val specs: StateFlow<List<SiteSpec>> = _specs.asStateFlow()
@@ -167,21 +165,44 @@ object TakamiForge {
         .firstOrNull { it.host == host }
         ?.let { VirtualAnimeSource(it, engine) }
 
-    suspend fun save(spec: SiteSpec) = withContext(Dispatchers.IO) {
-        val updated = spec.copy(updatedAt = System.currentTimeMillis())
-        val next = _specs.value.filterNot { it.host == updated.host } + updated
-        _specs.value = next
-        write(next)
-        // Список источников фильтруется по включённым языкам: без этого шага
-        // добавленный источник просто не появится в «Источниках».
-        enableLanguage(updated.lang)
-        updated
-    }
+    /**
+     * Сохраняет спеку и решает, оставить ли новую версию.
+     *
+     * Правка считается удачной, только если источник проходит не меньше проверок,
+     * чем до неё. Иначе возвращается прошлая рабочая версия, а причина уходит в
+     * журнал: пользователь ничего не замечает, источник просто продолжает работать.
+     */
+    suspend fun save(spec: SiteSpec, failedChecks: List<String> = emptyList()): SiteSpec =
+        withContext(Dispatchers.IO) {
+            val history = SpecHistory(dir)
+            val candidate = spec.stamped()
+            val previous = _specs.value.firstOrNull { it.host == candidate.host }
+            // Новая версия сначала становится рабочей: сравнить можно только с тем,
+            // что уже записано.
+            history.record(candidate)
+            val decision = SpecRollback.apply(previous, candidate, failedChecks, SpecJournal(dir))
+            val accepted = if (decision.rolledBack) {
+                // Откат: снимаем неудачную версию и возвращаем прошлую.
+                history.rollback(candidate.host)
+                    ?: previous?.also { history.record(it) }
+                    ?: candidate
+            } else {
+                candidate
+            }
+            val next = _specs.value.filterNot { it.host == accepted.host } + accepted
+            _specs.value = next
+            write(next)
+            // Список источников фильтруется по включённым языкам: без этого шага
+            // добавленный источник просто не появится в «Источниках».
+            enableLanguage(accepted.lang)
+            accepted
+        }
 
     suspend fun remove(host: String) = withContext(Dispatchers.IO) {
         val next = _specs.value.filterNot { it.host == host }
         _specs.value = next
         write(next)
+        SpecHistory(dir).forget(host)
     }
 
     private fun enableLanguage(lang: String) {
@@ -201,18 +222,33 @@ object TakamiForge {
         return ID_BASE + (crc.value and 0x0000_FFFF_FFFFL)
     }
 
+    /** Чтение спек с подъёмом файлов старой установки до текущей версии схемы. */
     private fun read(target: File): List<SiteSpec> {
         val file = File(target, FILE)
         if (!file.exists()) return emptyList()
-        return runCatching { json.decodeFromString<List<SiteSpec>>(file.readText()) }
-            .onFailure { logcat(LogPriority.ERROR, it) { "Takami: не прочитал спеки" } }
-            .getOrDefault(emptyList())
+        val result = SpecMigration.migrate(file.readText())
+        result.reason?.let { reason ->
+            logcat(LogPriority.ERROR) { "Takami: " + reason }
+        }
+        if (result.changed) {
+            // Файл без версии переписываем сразу: иначе миграция повторялась бы
+            // при каждом запуске.
+            runCatching { writeAtomically(file, SpecMigration.encode(result.specs)) }
+        }
+        return result.specs
     }
 
+    /**
+     * Запись через временный файл: при сбое старый список остаётся целым.
+     *
+     * Версия схемы пишется рядом со спеками — по ней чтение понимает, что перед ним.
+     */
     private fun write(specs: List<SiteSpec>) {
         val target = dir ?: return
-        runCatching {
-            File(target, FILE).writeText(json.encodeToString(specs))
-        }.onFailure { logcat(LogPriority.ERROR, it) { "Takami: не записал спеки" } }
+        val current = specs.map { spec ->
+            if (spec.version == SPEC_VERSION) spec else spec.copy(version = SPEC_VERSION)
+        }
+        runCatching { writeAtomically(File(target, FILE), SpecMigration.encode(current)) }
+            .onFailure { logcat(LogPriority.ERROR, it) { "Takami: не записал спеки" } }
     }
 }
