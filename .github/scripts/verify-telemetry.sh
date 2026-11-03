@@ -337,9 +337,16 @@ echo
 echo "--- гигиена ---"
 
 if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
-    DEPS=$(git diff "$BASE"...HEAD -- gradle/libs.versions.toml app/build.gradle.kts 2>/dev/null \
-        | grep -E '^\+' | grep -v '^\+\+\+' \
-        | grep -iE 'implementation|libs\.|classpath|kapt|ksp|plugin' || true)
+    # Внимание: сравнивать надо объявления зависимостей, а не любую правку файла
+    # (добавление поля сборки зависимостью не является). Но и не наоборот.
+    # Раньше здесь стоял фильтр '^\+\+\+' без -E: в BRE это «один и более плюсов»,
+    # поэтому он выкидывал ВСЕ добавленные строки и проверка всегда была зелёной.
+    ADDED=$(git diff "$BASE"...HEAD -- gradle/libs.versions.toml app/build.gradle.kts 2>/dev/null \
+        | sed -n 's/^+//p')
+    DEPS=$(printf '%s\n' "$ADDED" | awk '
+        /^[[:space:]]*(api|implementation|testImplementation|androidTestImplementation|debugImplementation|releaseImplementation|compileOnly|runtimeOnly|kapt|ksp|annotationProcessor|classpath|coreLibraryDesugaring)[[:space:](]/ { print; next }
+        /^[[:space:]]*[A-Za-z0-9_.-]+[[:space:]]*=[[:space:]]*\{/ { print }
+    ' || true)
     if [ -z "$DEPS" ]; then
         ok T35 "новых зависимостей нет"
     else
