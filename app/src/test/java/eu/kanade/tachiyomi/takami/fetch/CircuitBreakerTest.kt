@@ -88,9 +88,9 @@ class CircuitBreakerTest {
         first.isFailure shouldBe true
         second.exceptionOrNull()!!::class shouldBe BreakerOpenError::class
         third.exceptionOrNull()!!::class shouldBe BreakerOpenError::class
-        // Пробный прошёл один раз, дальше — своя тройка повторов
-        // внутри него.
-        (server.requestCount - before) shouldBe FetchLimits.RETRY_ATTEMPTS
+        // Пробный уходит один раз: его неудача сразу возвращает паузу,
+        // поэтому повтор внутри той же операции уже не проходит.
+        (server.requestCount - before) shouldBe 1
         gate.state(server.hostName).state shouldBe BreakerState.OPEN
     }
 
