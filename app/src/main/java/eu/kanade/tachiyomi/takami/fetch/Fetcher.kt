@@ -28,6 +28,7 @@ import eu.kanade.tachiyomi.network.dohNajalla
 import eu.kanade.tachiyomi.network.dohQuad101
 import eu.kanade.tachiyomi.network.dohQuad9
 import eu.kanade.tachiyomi.network.dohShecan
+import eu.kanade.tachiyomi.takami.report.TakamiReports
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -235,6 +236,25 @@ class Fetcher internal constructor(
         }
     }
 
+    /**
+     * Отправка отчёта: нужен только код ответа, тело служебное.
+     *
+     * Один проход через общий диспетчер: повторов здесь нет, иначе при
+     * недоступном приёме запросы пошли бы подряд.
+     */
+    suspend fun postReport(url: String, body: String): Int {
+        currentCoroutineContext().ensureActive()
+        val raw = attempt(
+            url = url,
+            referer = null,
+            priority = FetchPriority.BACKGROUND,
+            head = false,
+            post = body,
+            headers = emptyMap(),
+        )
+        return raw.code
+    }
+
     suspend fun post(url: String, body: String, referer: String? = null): String {
         currentCoroutineContext().ensureActive()
         val raw = send(url, referer, FetchPriority.INTERACTIVE, post = body)
@@ -432,6 +452,7 @@ class Fetcher internal constructor(
         // Домен в паузе: ни одного запроса, даже пробного.
         if (breaker?.allow(host) == false) throw BreakerOpenError(host)
 
+        val healthBefore = breaker?.state(host)?.state
         // Пробный запрос после паузы: его неудача снова закрывает домен,
         // и повтор внутри той же операции уже не имеет смысла.
         val probing = breaker?.state(host)?.state == BreakerState.HALF_OPEN
@@ -439,10 +460,13 @@ class Fetcher internal constructor(
             sendOnce(url, referer, priority, head, post, headers, host)
         } catch (e: IOException) {
             breaker?.onFailure(host, e.message)
+            noteFailure(url, e)
+            noteHealth(host, healthBefore)
             if (probing && breaker?.allow(host) == false) throw BreakerOpenError(host)
             throw e
         }
         breaker?.onSuccess(host)
+        noteHealth(host, healthBefore)
         if (first.protection.passed) return first
 
         // Уровень A: настоящий браузер проходит проверку сам. Повтор — один.
@@ -556,9 +580,45 @@ class Fetcher internal constructor(
         level: ProtectionLevel,
         reason: String,
     ): Nothing {
+        TakamiReports.noteFailure(host, "protection", level.name.lowercase(), "blocked", null, 0L, 0)
         protection.mark(host, level, reason, System.currentTimeMillis())
         logcat(LogPriority.DEBUG) { "Takami: " + host + " требует проверки — " + reason }
         throw VerificationRequiredError(host, level, url)
+    }
+
+    /**
+     * Отчёт о сбое: шаг, тип ошибки и код ответа.
+     *
+     * Тексты ошибок содержат адреса, поэтому наружу уходит только тип.
+     */
+    private fun noteFailure(url: String, error: IOException) {
+        val host = runCatching { hostOf(url) }.getOrDefault("")
+        if (host.isBlank()) return
+        val step = when (error) {
+            is HttpStatusError -> "response"
+            is NetworkError -> "network"
+            is BreakerOpenError -> "pause"
+            is DailyLimitReached -> "limit"
+            is VerificationRequiredError -> "check"
+            is ChallengePageError -> "challenge"
+            is NotHtmlError -> "content"
+            is PageTooLargeError -> "content"
+            is TooManyRedirectsError -> "redirect"
+            else -> "other"
+        }
+        val code = (error as? HttpStatusError)?.code
+        val kind = error::class.simpleName ?: "error"
+        TakamiReports.noteFailure(host, step, kind, healthOf(host), code, 0L, 0)
+    }
+
+    private fun healthOf(host: String): String =
+        breaker?.state(host)?.state?.name?.lowercase() ?: "unknown"
+
+    /** Смена состояния источника: сообщаем только о переходах. */
+    private fun noteHealth(host: String, before: BreakerState?) {
+        val now = breaker?.state(host)?.state ?: return
+        if (before == null || before == now) return
+        TakamiReports.noteHealth(host, now.name.lowercase())
     }
 
     private fun nextHop(current: String, raw: Raw, original: String): String {
@@ -692,6 +752,9 @@ class Fetcher internal constructor(
                 val app = context.applicationContext
                 val guard = HostGuard(budget ?: FileRequestBudget(app))
                 val breaker = CircuitBreaker(File(app.filesDir, BREAKER_FILE))
+                // Сбор отчётов стартует вместе с сетью: без адреса в сборке
+                // он просто ничего не отправляет.
+                TakamiReports.start(app)
                 instance = Fetcher(
                     client = buildClient(currentDohProvider()),
                     guard = guard,

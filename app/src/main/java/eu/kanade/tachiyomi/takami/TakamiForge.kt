@@ -10,6 +10,7 @@ import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.takami.fetch.Fetcher
+import eu.kanade.tachiyomi.takami.fetch.NetworkDiagnostics
 import eu.kanade.tachiyomi.takami.spec.SPEC_VERSION
 import eu.kanade.tachiyomi.takami.spec.SpecHistory
 import eu.kanade.tachiyomi.takami.spec.SpecJournal
@@ -195,6 +196,7 @@ object TakamiForge {
             // Список источников фильтруется по включённым языкам: без этого шага
             // добавленный источник просто не появится в «Источниках».
             enableLanguage(accepted.lang)
+            NetworkDiagnostics.noteSpecCheck(accepted.host, failedChecks.isEmpty(), failedChecks.size)
             accepted
         }
 

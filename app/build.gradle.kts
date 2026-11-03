@@ -29,6 +29,13 @@ android {
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getGitSha()}\"")
+        // Адрес приёмника отчётов приходит из секрета сборки: в репозитории его нет.
+        // Пустое значение выключает отправку целиком.
+        buildConfigField(
+            "String",
+            "TELEMETRY_URL",
+            "\"${providers.environmentVariable("TELEMETRY_URL").orElse("").get()}\"",
+        )
         buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = false)}\"")
         buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
         buildConfigField("boolean", "PRIVATE_GEMINI_BRIDGE_ENABLED", "$hasPrivateGeminiBridge")

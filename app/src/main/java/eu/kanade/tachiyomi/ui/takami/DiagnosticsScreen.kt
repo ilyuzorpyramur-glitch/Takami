@@ -35,7 +35,9 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import com.tadami.aurora.BuildConfig
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.takami.fetch.BreakerState
+import androidx.compose.material3.Switch
 import eu.kanade.tachiyomi.takami.fetch.HostReport
+import eu.kanade.tachiyomi.takami.fetch.ReportsView
 import eu.kanade.tachiyomi.takami.fetch.VerificationStatus
 import eu.kanade.tachiyomi.takami.fetch.NetworkDiagnostics
 import kotlinx.coroutines.launch
@@ -59,10 +61,12 @@ class DiagnosticsScreen : Screen() {
         var reports by remember { mutableStateOf<List<HostReport>>(emptyList()) }
         var loaded by remember { mutableStateOf(false) }
         var waiting by remember { mutableStateOf<List<VerificationStatus>>(emptyList()) }
+        var reports by remember { mutableStateOf(ReportsView()) }
 
         suspend fun reload() {
             reports = NetworkDiagnostics.report()
             waiting = NetworkDiagnostics.verifications()
+            reports = NetworkDiagnostics.reports()
             loaded = true
         }
 
@@ -137,6 +141,66 @@ class DiagnosticsScreen : Screen() {
                     }
                 }
 
+                Text(
+                    text = if (reports.active) {
+                        "Сбор отчётов для калибровки, до 31 января 2027. " +
+                            "После этого выключится сам."
+                    } else {
+                        "Срок калибровки прошёл: отчёты больше не отправляются."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(text = "Отчёты о сбоях", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "В очереди: " + reports.queued,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "Отправлено всего: " + reports.totalSent,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = if (reports.lastSentAt == 0L) {
+                                "Ещё не отправляли"
+                            } else {
+                                "Последняя отправка: " + formatSent(reports.lastSentAt)
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Отправлять отчёты",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Switch(
+                                checked = reports.enabled,
+                                onCheckedChange = { value ->
+                                    scope.launch {
+                                        NetworkDiagnostics.setReportsEnabled(value)
+                                        reports = NetworkDiagnostics.reports()
+                                    }
+                                },
+                            )
+                        }
+                        if (BuildConfig.DEBUG) {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        NetworkDiagnostics.clearReports()
+                                        reports = NetworkDiagnostics.reports()
+                                    }
+                                },
+                            ) {
+                                Text("Очистить очередь")
+                            }
+                        }
+                    }
+                }
+
                 if (BuildConfig.DEBUG) {
                     OutlinedButton(
                         onClick = {
@@ -196,3 +260,7 @@ class DiagnosticsScreen : Screen() {
         BreakerState.HALF_OPEN -> "проверка: один пробный запрос"
     }
 }
+
+private fun formatSent(at: Long): String =
+    java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault())
+        .format(java.util.Date(at))

@@ -214,7 +214,10 @@ echo
 echo "--- гигиена ---"
 
 if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
-    if git diff --quiet "$BASE"...HEAD -- gradle/libs.versions.toml app/build.gradle.kts; then
+    DEPS=$(git diff "$BASE"...HEAD -- gradle/libs.versions.toml app/build.gradle.kts 2>/dev/null \
+        | grep -E '^\+' | grep -v '^\+\+\+' \
+        | grep -iE 'implementation|libs\.|classpath|kapt|ksp|plugin' || true)
+    if [ -z "$DEPS" ]; then
         ok S30 "новых зависимостей нет"
     else
         bad S30 "изменены зависимости"

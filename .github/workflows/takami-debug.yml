@@ -7,6 +7,7 @@ on:
       - "app/src/test/**"
       - "i18n/src/**"
       - ".github/workflows/takami-debug.yml"
+      - "telemetry-collector/**"
   workflow_dispatch:
 
 concurrency:
@@ -30,10 +31,26 @@ jobs:
       - uses: gradle/actions/setup-gradle@94baf225fe0a508e581a564467443d0e2379123b # v4.3.0
 
       - name: Unit tests (сетевой слой Takami)
-        run: ./gradlew :app:testDebugUnitTest --tests "eu.kanade.tachiyomi.takami.fetch.*" --console=plain
+        run: >-
+          ./gradlew :app:testDebugUnitTest
+          --tests "eu.kanade.tachiyomi.takami.fetch.*"
+          --tests "eu.kanade.tachiyomi.takami.report.*"
+          --console=plain
+
+      - name: Адрес приёмника задан
+        run: |
+          if [ -n "$REPORT_ENDPOINT" ]; then
+            echo "адрес приёмника задан: да"
+          else
+            echo "адрес приёмника задан: нет"
+          fi
+        env:
+          REPORT_ENDPOINT: ${{ secrets.TELEMETRY_URL }}
 
       - name: Build debug (x86_64)
         run: ./gradlew :app:assembleDebug -Ptakami.abi=x86_64 --console=plain
+        env:
+          TELEMETRY_URL: ${{ secrets.TELEMETRY_URL }}
 
       - name: Проверить, что APK ровно один
         run: |
