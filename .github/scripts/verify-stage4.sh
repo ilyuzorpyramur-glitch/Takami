@@ -190,6 +190,30 @@ else
 fi
 
 echo
+echo "--- DNS и защиты ---"
+
+F="$TAKAMI/fetch/Fetcher.kt"
+if [ -f "$F" ]; then
+    if grep -qE "dohProvider|DnsOverHttps|dohCloudflare|NetworkHelper" "$F"; then
+        ok V29 "сетевой слой виртуальных источников уважает настройку DNS over HTTPS"
+    else
+        bad V29 "Fetcher строит свой клиент без DoH: при блокировке DNS виртуальные источники падают, а обычные расширения работают"
+    fi
+    if grep -qE "CloudflareInterceptor" "$F"; then
+        bad V30 "в сетевой слой виртуальных источников подключён автопроход Cloudflare"
+    else
+        ok V30 "автопрохода защит в нашем слое нет"
+    fi
+    if grep -qE "CookieJar|cookieJar" "$F"; then
+        ok V31 "cookie ведёт сам слой (совместимо с хранением сессий)"
+    else
+        skip V31 "cookie-jar не найден — проверить при этапе cookie"
+    fi
+else
+    skip V29 "Fetcher.kt не найден"
+fi
+
+echo
 echo "--- гигиена ---"
 
 if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
