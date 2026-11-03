@@ -79,8 +79,8 @@ class CircuitBreakerTest {
         clock.advance(FetchLimits.BREAKER_PAUSE_MS + 1L)
         val before = server.requestCount
 
-        // Второй и третий вызовы приходят, пока пробный ещё не
-        // завершился.
+        // Вызовы идут по очереди: пробный достаётся первому, его неудача
+        // сразу возвращает паузу, и следующие уже не стучатся в сайт.
         val first = runCatching { fetcher.get(url) }
         val second = runCatching { fetcher.get(url) }
         val third = runCatching { fetcher.get(url) }

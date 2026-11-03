@@ -124,7 +124,8 @@ class ReporterTest {
         reporter.sendIfDue(justBeforeEnd) shouldBe SendOutcome.SENT
         reporter.status(justBeforeEnd).totalSent shouldBe REPORT_BATCH_SIZE
         reporter.queueSize() shouldBe 0
-        reporter.sendIfDue(justBeforeEnd + hour) shouldBe SendOutcome.EMPTY
+        // Через час отправлять нечего: очередь пуста.
+        reporter.sendIfDue(justBeforeEnd + 1_000L) shouldBe SendOutcome.NOT_DUE
     }
 
     @Test
