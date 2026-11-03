@@ -47,10 +47,21 @@ jobs:
         env:
           REPORT_ENDPOINT: ${{ secrets.TELEMETRY_URL }}
 
+      - name: Подпись приёмника задана
+        run: |
+          if [ -n "$SIGNATURE" ]; then
+            echo "подпись задана: да"
+          else
+            echo "подпись задана: нет"
+          fi
+        env:
+          SIGNATURE: ${{ secrets.TELEMETRY_TOKEN }}
+
       - name: Build debug (x86_64)
         run: ./gradlew :app:assembleDebug -Ptakami.abi=x86_64 --console=plain
         env:
           TELEMETRY_URL: ${{ secrets.TELEMETRY_URL }}
+          TELEMETRY_TOKEN: ${{ secrets.TELEMETRY_TOKEN }}
 
       - name: Проверить, что APK ровно один
         run: |

@@ -242,15 +242,22 @@ class Fetcher internal constructor(
      * Один проход через общий диспетчер: повторов здесь нет, иначе при
      * недоступном приёме запросы пошли бы подряд.
      */
-    suspend fun postReport(url: String, body: String): Int {
+    suspend fun postReport(url: String, body: String, token: String = ""): Int {
         currentCoroutineContext().ensureActive()
+        // Подпись кладём в заголовок только при непустом значении:
+        // пустая подпись означает, что отправка выключена.
+        val headers = if (token.isEmpty()) {
+            emptyMap()
+        } else {
+            mapOf("Authorization" to "Bearer $token")
+        }
         val raw = attempt(
             url = url,
             referer = null,
             priority = FetchPriority.BACKGROUND,
             head = false,
             post = body,
-            headers = emptyMap(),
+            headers = headers,
         )
         return raw.code
     }

@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.takami.report
 
+import com.tadami.aurora.BuildConfig
 import eu.kanade.tachiyomi.takami.fetch.Fetcher
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -26,6 +27,9 @@ const val MAX_TOTAL_REPORTS = 2_000
 enum class SendOutcome {
     /** Адрес не задан в сборке: отправка выключена целиком. */
     NO_ENDPOINT,
+
+    /** Подпись не задана в сборке: приёмник закрыт, отправки нет. */
+    NO_SIGNATURE,
 
     /** Срок калибровки прошёл: очередь очищена, отправки больше нет. */
     EXPIRED,
@@ -68,10 +72,13 @@ class Reporter(
     private val dir: File?,
     private val endpoint: String,
     private val appVersion: String,
+    // Подпись приходит из сборки и дальше только передаётся в заголовок:
+    // в журнал и в состояние она не попадает.
+    private val token: String = BuildConfig.TELEMETRY_TOKEN,
     // По умолчанию отправка идёт общим сетевым слоем: те же лимиты домена,
     // что и у обычных запросов, отдельного пути наружу нет.
-    private val send: suspend (String, String) -> Unit = { url, body ->
-        Fetcher.get().postReport(url, body)
+    private val send: suspend (String, String, String) -> Unit = { url, body, signature ->
+        Fetcher.get().postReport(url, body, signature)
     },
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) {
@@ -112,6 +119,9 @@ class Reporter(
             return SendOutcome.EXPIRED
         }
         if (endpoint.isBlank()) return SendOutcome.NO_ENDPOINT
+        // Без подписи приёмник ответит 401, поэтому не стучимся вовсе:
+        // события остаются в очереди до сборки с секретом.
+        if (token.isEmpty()) return SendOutcome.NO_SIGNATURE
 
         val state = readState()
         if (!state.enabled) return SendOutcome.DISABLED
@@ -124,7 +134,7 @@ class Reporter(
         if (batch.isEmpty()) return SendOutcome.EMPTY
 
         val body = encodeBody(batch)
-        val delivered = runCatching { send(endpoint, body) }.isSuccess
+        val delivered = runCatching { send(endpoint, body, token) }.isSuccess
         // Время фиксируем в любом случае: иначе при недоступном приёмнике
         // попытки пошли бы подряд.
         val sent = if (delivered) {

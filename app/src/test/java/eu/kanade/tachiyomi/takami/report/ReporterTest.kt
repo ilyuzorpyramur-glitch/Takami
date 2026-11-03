@@ -18,19 +18,23 @@ class ReporterTest {
 
     private var calls = 0
     private val bodies = mutableListOf<String>()
+    private val signatures = mutableListOf<String>()
 
     private fun reporter(
         endpoint: String = "https://collector.example/ingest",
+        token: String = "signature",
         now: Long = justBeforeEnd,
         fail: Boolean = false,
     ): Reporter = Reporter(
         dir = dir,
         endpoint = endpoint,
         appVersion = "0.1",
+        token = token,
         clock = { now },
-        send = { _, body ->
+        send = { _, body, signature ->
             calls++
             bodies += body
+            signatures += signature
             if (fail) throw IllegalStateException("приёмник недоступен")
         },
     )
@@ -140,5 +144,25 @@ class ReporterTest {
         reporter.sendIfDue(justBeforeEnd) shouldBe SendOutcome.LIMIT_REACHED
         calls shouldBe 0
         reporter.queueSize() shouldBe 5
+    }
+
+    @Test
+    fun `подпись передаётся в отправку`(): Unit = runBlocking {
+        val reporter = reporter()
+        fill(reporter, 2)
+
+        reporter.sendIfDue(justBeforeEnd) shouldBe SendOutcome.SENT
+
+        signatures shouldBe listOf("signature")
+    }
+
+    @Test
+    fun `пустая подпись не отправляет и не теряет события`(): Unit = runBlocking {
+        val reporter = reporter(token = "")
+        fill(reporter, 3)
+
+        reporter.sendIfDue(justBeforeEnd) shouldBe SendOutcome.NO_SIGNATURE
+        calls shouldBe 0
+        reporter.queueSize() shouldBe 3
     }
 }

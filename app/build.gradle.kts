@@ -36,6 +36,12 @@ android {
             "TELEMETRY_URL",
             "\"${providers.environmentVariable("TELEMETRY_URL").orElse("").get()}\"",
         )
+        // Подпись запроса к приёмнику: тоже из секрета. Пустая — отправки нет.
+        buildConfigField(
+            "String",
+            "TELEMETRY_TOKEN",
+            "\"${providers.environmentVariable("TELEMETRY_TOKEN").orElse("").get()}\"",
+        )
         buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = false)}\"")
         buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
         buildConfigField("boolean", "PRIVATE_GEMINI_BRIDGE_ENABLED", "$hasPrivateGeminiBridge")

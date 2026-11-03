@@ -178,4 +178,23 @@ class FetcherTest {
         again shouldBe "<html>раз</html>"
         server.requestCount shouldBe 1
     }
+
+    @Test
+    fun `отчёт уходит с подписью в заголовке`(): Unit = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(202))
+
+        val code = fetcher().postReport(server.url("/ingest").toString(), "{}", "secret")
+
+        code shouldBe 202
+        server.takeRequest().getHeader("Authorization") shouldBe "Bearer secret"
+    }
+
+    @Test
+    fun `отчёт без подписи не несёт заголовка`(): Unit = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(202))
+
+        fetcher().postReport(server.url("/ingest").toString(), "{}")
+
+        server.takeRequest().getHeader("Authorization") shouldBe null
+    }
 }
