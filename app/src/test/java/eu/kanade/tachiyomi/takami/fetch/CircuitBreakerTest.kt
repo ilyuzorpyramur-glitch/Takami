@@ -139,28 +139,18 @@ class CircuitBreakerTest {
 
     @Test
     fun `домены независимы`(): Unit = runBlocking {
-        val second = MockWebServer()
-        second.dispatcher = object : Dispatcher() {
+        server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse =
                 MockResponse().setBody("<html>ok</html>")
         }
-        second.start()
-        try {
-            server.dispatcher = alwaysFailing()
-            val gate = breaker()
-            val fetcher = fetcher(gate)
-            assertFailsWith<HttpStatusError> {
-                fetcher.get(server.url("/catalog").toString())
-            }
+        val gate = breaker()
+        repeat(FetchLimits.BREAKER_FAILURES) { gate.onFailure("fallen.example", "HTTP 503") }
 
-            val healthy = fetcher.get(second.url("/catalog").toString())
+        val healthy = fetcher(gate).get(server.url("/catalog").toString())
 
-            healthy.contains("ok") shouldBe true
-            gate.state(server.hostName).state shouldBe BreakerState.OPEN
-            gate.state(second.hostName).state shouldBe BreakerState.CLOSED
-        } finally {
-            second.shutdown()
-        }
+        healthy.contains("ok") shouldBe true
+        gate.state("fallen.example").state shouldBe BreakerState.OPEN
+        gate.state(server.hostName).state shouldBe BreakerState.CLOSED
     }
 
     @Test

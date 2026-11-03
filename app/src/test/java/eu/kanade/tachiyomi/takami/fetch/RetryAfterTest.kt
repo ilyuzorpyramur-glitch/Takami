@@ -13,10 +13,7 @@ import org.junit.jupiter.api.Test
 import java.util.Collections
 import kotlin.test.assertFailsWith
 
-/**
- * Ответ 429: пауза из заголовка Retry-After уважается следующим
- * запросом.
- */
+/** Ответ 429: пауза из заголовка Retry-After уважается каждой следующей попыткой. */
 class RetryAfterTest {
     private lateinit var server: MockWebServer
     private lateinit var clock: FakeFetchClock
@@ -34,41 +31,39 @@ class RetryAfterTest {
         server.shutdown()
     }
 
+    private fun fetcher(): Fetcher = Fetcher(
+        Fetcher.buildClient(),
+        HostGuard(InMemoryRequestBudget(), clock, jitter = { 0L }),
+    )
+
     @Test
     fun `429 задаёт паузу`(): Unit = runBlocking {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 arrivals += clock.now()
-                return if (arrivals.size == 1) {
-                    MockResponse().setResponseCode(429).setHeader("Retry-After", "3")
-                } else {
-                    MockResponse().setBody("<html>ok</html>")
-                }
+                return MockResponse().setResponseCode(429).setHeader("Retry-After", "3")
             }
         }
-        val guard = HostGuard(InMemoryRequestBudget(), clock)
-        val fetcher = Fetcher(Fetcher.buildClient(), guard)
         val url = server.url("/catalog").toString()
 
-        val error = assertFailsWith<HttpStatusError> { fetcher.get(url) }
+        val error = assertFailsWith<HttpStatusError> { fetcher().get(url) }
+
         error.code shouldBe 429
         error.retryAfterMs shouldBe 3_000L
-
-        fetcher.get(url)
-
-        arrivals.size shouldBe 2
+        arrivals.size shouldBe FetchLimits.RETRY_ATTEMPTS
         (arrivals[1] - arrivals[0]) shouldBeGreaterThanOrEqual 3_000L
+        (arrivals[2] - arrivals[1]) shouldBeGreaterThanOrEqual 3_000L
     }
 
     @Test
-    fun `429 без Retry-After даёт паузу по умолчанию`(): Unit = runBlocking {
+    fun `429 без заголовка даёт паузу по умолчанию`(): Unit = runBlocking {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse =
                 MockResponse().setResponseCode(429)
         }
-        val guard = HostGuard(InMemoryRequestBudget(), clock)
-        val fetcher = Fetcher(Fetcher.buildClient(), guard)
-        val error = assertFailsWith<HttpStatusError> { fetcher.get(server.url("/x").toString()) }
+        val error = assertFailsWith<HttpStatusError> {
+            fetcher().get(server.url("/x").toString())
+        }
 
         error.retryAfterMs shouldBe FetchLimits.DEFAULT_RETRY_AFTER_MS
     }
