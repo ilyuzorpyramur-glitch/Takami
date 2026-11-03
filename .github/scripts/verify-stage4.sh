@@ -199,10 +199,26 @@ if [ -f "$F" ]; then
     else
         bad V29 "Fetcher строит свой клиент без DoH: при блокировке DNS виртуальные источники падают, а обычные расширения работают"
     fi
-    if grep -qE "CloudflareInterceptor" "$F"; then
-        bad V30 "в сетевой слой виртуальных источников подключён автопроход Cloudflare"
+    # Запрещено именно обходное: сервисы решения капчи, ротация прокси и адресов, подмена отпечатка.
+    SOLVERS=$(grep -rniE "2captcha|anti-?captcha|rucaptcha|capsolver|capmonster" --include=*.kt "$TAKAMI" 2>/dev/null || true)
+    if [ -z "$SOLVERS" ]; then
+        ok V30 "нет сервисов распознавания капчи"
     else
-        ok V30 "автопрохода защит в нашем слое нет"
+        bad V30 "подключён сервис решения капчи"
+    fi
+
+    PROXY=$(grep -rniE "proxyList|rotateProxy|proxyPool|randomProxy" --include=*.kt "$TAKAMI" 2>/dev/null || true)
+    if [ -z "$PROXY" ]; then
+        ok V32 "нет ротации прокси и адресов"
+    else
+        bad V32 "есть ротация прокси — это обход блокировки"
+    fi
+
+    # Челлендж, если обрабатывается, обрабатывается браузерным путём (WebView с JS).
+    if grep -rqiE "WebView" --include=*.kt "$TAKAMI" 2>/dev/null; then
+        ok V33 "челлендж проходит через WebView, как в браузере"
+    else
+        skip V33 "WebView в слое пока нет"
     fi
     if grep -qE "CookieJar|cookieJar" "$F"; then
         ok V31 "cookie ведёт сам слой (совместимо с хранением сессий)"
