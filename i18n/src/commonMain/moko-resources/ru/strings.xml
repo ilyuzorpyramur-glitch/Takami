@@ -1885,4 +1885,14 @@
     <string name="swipe_refresh">Обновить</string>
     <string name="swipe_retry">Повторить</string>
     <string name="swipe_find_manual">Найти вручную</string>
+
+    <!-- Новости -->
+    <string name="news_title">Новости</string>
+    <string name="news_more">Все</string>
+    <string name="news_today">сегодня</string>
+    <string name="news_yesterday">вчера</string>
+    <string name="news_screen_title">Все новости</string>
+    <string name="news_empty">Новостей пока нет</string>
+    <string name="news_retry">Проверить снова</string>
+    <string name="news_refresh">Обновить</string>
 </resources>

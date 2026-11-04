@@ -2092,4 +2092,14 @@
     <string name="swipe_refresh">Refresh</string>
     <string name="swipe_retry">Retry</string>
     <string name="swipe_find_manual">Find manually</string>
+
+    <!-- Новости -->
+    <string name="news_title">News</string>
+    <string name="news_more">All</string>
+    <string name="news_today">today</string>
+    <string name="news_yesterday">yesterday</string>
+    <string name="news_screen_title">All news</string>
+    <string name="news_empty">No news yet</string>
+    <string name="news_retry">Check again</string>
+    <string name="news_refresh">Refresh</string>
 </resources>
