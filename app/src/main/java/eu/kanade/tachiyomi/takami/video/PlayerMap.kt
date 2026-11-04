@@ -9,7 +9,7 @@ package eu.kanade.tachiyomi.takami.video
  */
 object PlayerMap {
 
-    private val PAIR = Regex("""\[([^\]]{1,16})]\s*((?:https?:)?//[^\s,"'\]]+)""")
+    private val PAIR = Regex("""\[([^\]]{1,16})\]\s*((?:https?:)?//[^\s,"'\]]+)""")
 
     private val OBJECT = Regex("""["']?(\d{3,4}p?)["']?\s*:\s*["']((?:https?:)?//[^"']+)["']""")
 

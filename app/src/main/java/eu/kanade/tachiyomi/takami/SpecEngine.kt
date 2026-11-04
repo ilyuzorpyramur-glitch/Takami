@@ -481,12 +481,17 @@ class SpecEngine(
         private val EPISODE_HINT = Regex("""(?i)(серия|эпизод|episode|series\s*\d)""")
 
         private val REVERSED = Regex(
-            """((?:https?:)?//[^\s"'<>,\[\]]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"'<>,\[\]]*)?)\s*,\s*\[([^\]]{1,12})]""",
+            """((?:https?:)?//[^\s"'<>,\[\]]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"'<>,\[\]]*)?)\s*,\s*\[([^\]]{1,12})\]""",
         )
         private val PAGE_NUMBER = Regex("""(?:page[/=])(\d+)""")
 
+        /**
+         * Движок регулярок Android (ICU) строже JVM: незакрытая `}` в
+         * шаблоне роняет компиляцию, а на JVM тот же шаблон проходит.
+         * Поэтому закрывающие скобки экранируем явно — см. RegexPortableTest.
+         */
         private val FILE_FIELD = Regex(
-            """(?:^|[^A-Za-z])file\s*[:=]\s*(\[[^\]]*]|\{[^}]*}|"[^"]*"|'[^']*')""",
+            """(?:^|[^A-Za-z])file\s*[:=]\s*(\[[^\]]*\]|\{[^}]*\}|"[^"]*"|'[^']*')""",
             RegexOption.IGNORE_CASE,
         )
     }
