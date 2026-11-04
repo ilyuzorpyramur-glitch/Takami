@@ -151,7 +151,38 @@ data class VideoSpec(
     val embedAttrs: List<String> = listOf(
         "src", "data-src", "data-iframe", "data-player", "data-href", "data",
     ),
+    /** Как добывать ссылку, если статики не хватило. */
+    val sniff: SniffSpec = SniffSpec(),
 )
+
+/** Как добывать ссылку, если статического разбора не хватило. */
+@Serializable
+data class SniffSpec(
+    /** fallback | always | never; неизвестное значение считается fallback. */
+    val mode: String = MODE_FALLBACK,
+    /** Сколько ждём первого медиа-адреса. */
+    val timeoutMs: Int = 12_000,
+    /** Сколько ещё слушаем после первой находки: нужен мастер, а не сегмент. */
+    val settleMs: Int = 1_500,
+    /** Сколько страниц разрешено открыть за один снимок. */
+    val maxPages: Int = 2,
+    /** Что считаем медиа по адресу. */
+    val mediaPatterns: List<String> = listOf(".m3u8", ".mpd", ".mp4", ".webm"),
+    /** Домены, с которых ссылки не берём вовсе. */
+    val denyHosts: List<String> = emptyList(),
+    /** Заголовки окна, которые передаём плееру вместе со ссылкой. */
+    val passHeaders: List<String> = listOf("Referer", "Origin", "Cookie", "User-Agent"),
+) {
+    /** Режим снимка: неизвестное значение трактуем как fallback. */
+    val modeOrDefault: String
+        get() = mode.takeIf { it in setOf(MODE_FALLBACK, MODE_ALWAYS, MODE_NEVER) } ?: MODE_FALLBACK
+
+    companion object {
+        const val MODE_FALLBACK = "fallback"
+        const val MODE_ALWAYS = "always"
+        const val MODE_NEVER = "never"
+    }
+}
 
 /** Известный плеер: имя, адрес и способ разбора. */
 @Serializable
