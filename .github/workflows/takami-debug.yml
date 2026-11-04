@@ -33,8 +33,7 @@ jobs:
       - name: Unit tests (сетевой слой Takami)
         run: >-
           ./gradlew :app:testDebugUnitTest
-          --tests "eu.kanade.tachiyomi.takami.fetch.*"
-          --tests "eu.kanade.tachiyomi.takami.report.*"
+          --tests "eu.kanade.tachiyomi.takami.*"
           --console=plain
 
       - name: Адрес приёмника задан
