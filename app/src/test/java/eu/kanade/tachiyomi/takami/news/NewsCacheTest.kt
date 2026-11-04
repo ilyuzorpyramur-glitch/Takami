@@ -1,7 +1,7 @@
 package eu.kanade.tachiyomi.takami.news
 
 import io.kotest.matchers.nulls.shouldBeNull
-import io.kotest.matchers.nulls.shouldNotBe
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -27,7 +27,7 @@ class NewsCacheTest {
 
         NewsCache.save(1L, NewsSnapshot(savedAt = 100L, items = listOf(item)))
 
-        NewsCache.load(1L) shouldNotBe null
+        NewsCache.load(1L) shouldNotBeNull()
         NewsCache.load(1L)!!.items.single().url shouldBe item.url
         NewsCache.load(1L)!!.savedAt shouldBe 100L
     }

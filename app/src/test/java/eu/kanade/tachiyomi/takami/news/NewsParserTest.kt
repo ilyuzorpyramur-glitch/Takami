@@ -1,7 +1,7 @@
 package eu.kanade.tachiyomi.takami.news
 
 import io.kotest.matchers.nulls.shouldBeNull
-import io.kotest.matchers.nulls.shouldNotBe
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
@@ -66,7 +66,7 @@ class NewsParserTest {
         first.url shouldBe "https://example.test/news/one.html"
         first.title shouldBe "Первая запись"
         first.snippet shouldBe "Короткий анонс первой записи, второй абзац."
-        first.publishedAt shouldNotBe null
+        first.publishedAt shouldNotBeNull()
     }
 
     @Test
@@ -82,7 +82,7 @@ class NewsParserTest {
         item.url shouldBe "https://example.test/blog/one.html"
         item.title shouldBe "Атомная запись"
         item.snippet shouldBe "Анонс первой атомной записи"
-        item.publishedAt shouldNotBe null
+        item.publishedAt shouldNotBeNull()
     }
 
     @Test
@@ -119,7 +119,7 @@ class NewsParserTest {
     @Test
     fun `кривая дата даёт пустую строку, а не начало эпохи`() {
         NewsParser.parseDate("не дата").shouldBeNull()
-        NewsParser.parseDate("2026-11-04T10:00:00+03:00") shouldNotBe null
+        NewsParser.parseDate("2026-11-04T10:00:00+03:00") shouldNotBeNull()
     }
 
     @Test
