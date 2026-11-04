@@ -181,7 +181,21 @@ fi
 echo
 echo "--- стиль ---"
 
-LONG=$(awk 'length > 120 {print FILENAME":"FNR}' "$TAKAMI/Sweep.kt" "$UI/SweepScreen.kt" "$UI/SweepScreenModel.kt" 2>/dev/null | head -5)
+# Длину считаем в знаках, а не в байтах: иначе русский комментарий
+# ложно считается длинной строкой.
+LONG=$(python3 - "$TAKAMI/Sweep.kt" "$UI/SweepScreen.kt" "$UI/SweepScreenModel.kt" <<'JSONL'
+import sys, pathlib
+out = []
+for name in sys.argv[1:]:
+    path = pathlib.Path(name)
+    if not path.is_file():
+        continue
+    for n, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        if len(line) > 120:
+            out.append(name + ":" + str(n))
+print(" ".join(out[:5]))
+JSONL
+)
 if [ -z "$LONG" ]; then
     ok K1 "нет строк длиннее 120 символов"
 else
