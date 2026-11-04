@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.takami.fetch.FetchedPage
 import eu.kanade.tachiyomi.takami.fetch.Fetcher
 import eu.kanade.tachiyomi.takami.video.Dubbing
+import eu.kanade.tachiyomi.takami.video.DubbingTrack
 import eu.kanade.tachiyomi.takami.video.HlsMaster
 import eu.kanade.tachiyomi.takami.video.PlayerMap
 import eu.kanade.tachiyomi.takami.video.Quality

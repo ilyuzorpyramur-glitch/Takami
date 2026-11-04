@@ -6,6 +6,7 @@ import tachiyomi.core.common.util.system.logcat
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import eu.kanade.tachiyomi.takami.video.VideoStream
 import org.jsoup.nodes.Element
 
 /**
