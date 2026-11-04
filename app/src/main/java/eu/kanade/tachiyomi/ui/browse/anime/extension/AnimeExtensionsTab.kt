@@ -70,6 +70,11 @@ fun animeExtensionsTab(
                 onClick = { navigator.push(TakamiForgeScreen()) },
             ),
             AppBar.OverflowAction(
+                title = "Прогон сайтов",
+                icon = Icons.Outlined.PlaylistPlay,
+                onClick = { navigator.push(SweepScreen()) },
+            ),
+            AppBar.OverflowAction(
                 title = "Фильтры источников",
                 icon = Icons.Outlined.FilterList,
                 onClick = { navigator.push(FilterScreen()) },

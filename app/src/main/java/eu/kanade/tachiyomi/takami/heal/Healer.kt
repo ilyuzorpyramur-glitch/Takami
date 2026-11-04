@@ -6,7 +6,6 @@ import eu.kanade.tachiyomi.takami.ParseFailures
 import eu.kanade.tachiyomi.takami.SelfCheck
 import eu.kanade.tachiyomi.takami.SiteSpec
 import eu.kanade.tachiyomi.takami.TakamiForge
-import eu.kanade.tachiyomi.takami.report.TakamiReports
 import eu.kanade.tachiyomi.takami.spec.SpecJournalEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -99,7 +98,6 @@ class Healer(
                     at = now,
                 ),
             )
-            TakamiReports.noteHeal(spec.host, part.name, "skipped")
             return HealResult(false, part, allow.reason, before.checks, emptyList())
         }
 
@@ -120,7 +118,6 @@ class Healer(
                 ),
             )
             ParseFailures.noteFailure(spec.host, "heal", reason, spec.version)
-            TakamiReports.noteHeal(spec.host, part.name, reason)
             return HealResult(false, part, reason, before.checks, emptyList())
         }
         val built = fresh as ForgeResult.Built
@@ -141,7 +138,6 @@ class Healer(
                 ),
             )
             ParseFailures.noteFailure(spec.host, "heal", "no_alternative", spec.version)
-            TakamiReports.noteHeal(spec.host, part.name, "failed")
             return HealResult(false, part, "no_alternative", before.checks, emptyList())
         }
 
@@ -162,7 +158,6 @@ class Healer(
                 ),
             )
             ParseFailures.noteFailure(spec.host, "heal", "verdict", spec.version)
-            TakamiReports.noteHeal(spec.host, part.name, "rejected")
             return HealResult(false, part, "rejected", before.checks, after.checks)
         }
 
@@ -181,7 +176,6 @@ class Healer(
                 at = now,
             ),
         )
-        TakamiReports.noteHeal(spec.host, part.name, "accepted")
         return HealResult(true, part, "", before.checks, after.checks)
     }
 

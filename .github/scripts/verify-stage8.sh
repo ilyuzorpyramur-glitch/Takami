@@ -115,9 +115,11 @@ else
     bad F2a "SPEC_VERSION изменился: $BASE_VER → $CUR_VER"
 fi
 
-TOUCHED=$(git diff --name-only "$BASE" -- "$TAKAMI/spec/SpecVersion.kt" "$TAKAMI/spec/SpecMigration.kt" "$TAKAMI/spec/SpecRollback.kt" 2>/dev/null)
+# С этапа 10 журнал откатов участвует в лечении: SpecJournalEntry дополняется
+# полями с дефолтами. Версию схемы несут SpecVersion и SpecMigration — их и проверяем.
+TOUCHED=$(git diff --name-only "$BASE" -- "$TAKAMI/spec/SpecVersion.kt" "$TAKAMI/spec/SpecMigration.kt" 2>/dev/null)
 if [ -z "$TOUCHED" ]; then
-    ok F2b "SpecVersion/SpecMigration/SpecRollback не тронуты"
+    ok F2b "SpecVersion/SpecMigration не тронуты"
 else
     bad F2b "тронуты файлы версии спеки: $(echo "$TOUCHED" | tr '\n' ' ')"
 fi

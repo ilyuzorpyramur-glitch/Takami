@@ -48,7 +48,8 @@ class HealLogTest {
         HealLog.write(entry("rejected", now))
 
         val line = File(File(files, "takami"), "heal.jsonl").readText()
-        val keys = line.substringAfter('{').substringBefore('}').split(',').map { it.trim().trim('"').substringBefore(':') }
+        val keys = line.substringAfter('{').substringBefore('}')
+            .split(',').map { it.trim().trim('"').substringBefore(':') }
 
         keys.toSet() shouldBe setOf("host", "part", "attempt", "decision", "reason", "before", "after", "trigger", "at")
     }

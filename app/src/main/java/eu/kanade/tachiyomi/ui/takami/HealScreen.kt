@@ -43,7 +43,7 @@ import java.util.Date
 /**
  * Экран «Починить источник»: что сломалось, можно ли лечить, итог попытки.
  *
- * Лечение запускается только этой кнопкой. Экран не обещает успеха заранее
+ * Лечение запускается только этой кнопкой. Экран не обещает результата заранее
  * и не рисует чисел, которых нет.
  */
 class HealScreen : Screen() {
@@ -141,7 +141,10 @@ class HealScreen : Screen() {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Что сломалось", style = MaterialTheme.typography.titleMedium)
                 for (step in state.failed) {
-                    Text(step.title + (if (step.note.isBlank()) "" else ": " + step.note), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        step.title + (if (step.note.isBlank()) "" else ": " + step.note),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
         }

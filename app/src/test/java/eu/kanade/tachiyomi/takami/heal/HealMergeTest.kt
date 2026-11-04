@@ -130,8 +130,8 @@ class HealMergeTest {
         HealMerge.merge(current, emptyFresh, SpecPart.CATALOG) shouldBe current
         HealMerge.merge(current, emptyFresh, SpecPart.CARD) shouldBe current
         HealMerge.merge(current, emptyFresh, SpecPart.EPISODES) shouldBe current
-        HealMerge.merge(current, fresh.copy(catalog = fresh.catalog.copy(pagination = PaginationSpec(template = ""))), SpecPart.PAGINATION) shouldBe
-            current
+        val emptyPagination = fresh.copy(catalog = fresh.catalog.copy(pagination = PaginationSpec(template = "")))
+        HealMerge.merge(current, emptyPagination, SpecPart.PAGINATION) shouldBe current
     }
 
     @Test

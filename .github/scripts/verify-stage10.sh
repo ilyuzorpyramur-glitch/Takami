@@ -197,7 +197,7 @@ fi
 echo "--- журнал ---"
 
 if [ -f "$HEAL/HealLog.kt" ]; then
-    if grep -q 'MAX_LINES = 500' "$HEAL/HealLog.kt" && grep -q 'обрезается' "$HEAL/HealLog.kt"; then
+    if grep -q 'MAX_LINES = 500' "$HEAL/HealLog.kt" && grep -q 'обреза' "$HEAL/HealLog.kt"; then
         ok H13a "журнал ограничен пятьюстами строками"
     else
         bad H13a "нет ограничения журнала"
