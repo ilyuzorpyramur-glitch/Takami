@@ -147,11 +147,15 @@ else
 fi
 
 if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
-    TOUCHED=$(git diff --name-only "$BASE"...HEAD -- app/src/main/java/eu/kanade/tachiyomi/takami/spec 2>/dev/null)
+    # Версию схемы несут SpecVersion и SpecMigration; журнал откатов
+    # (SpecRollback) правят другие этапы — он дополняется полями с умолчаниями.
+    TOUCHED=$(git diff --name-only "$BASE"...HEAD -- \
+        app/src/main/java/eu/kanade/tachiyomi/takami/spec/SpecVersion.kt \
+        app/src/main/java/eu/kanade/tachiyomi/takami/spec/SpecMigration.kt 2>/dev/null)
     if [ -z "$TOUCHED" ]; then
-        ok V11b "пакет версий спеки не тронут"
+        ok V11b "SpecVersion/SpecMigration не тронуты"
     else
-        bad V11b "тронут пакет версий: $(echo "$TOUCHED" | tr '\n' ' ')"
+        bad V11b "тронуты файлы версии спеки: $(echo "$TOUCHED" | tr '\n' ' ')"
     fi
 else
     skip V11b "базовая ветка недоступна"
