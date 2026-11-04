@@ -106,6 +106,9 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             name = title,
             engine = detected,
             iconUrl = iconOf(doc, url),
+            // Фильтры сканируются там же, откуда взяты карточки: блок на главной
+            // или в каталоге. Дальше их правят как обычные поля спеки.
+            filters = scanFilters(doc),
             catalog = CatalogSpec(
                 path = basePath,
                 latestPath = latestPath,
@@ -415,6 +418,103 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         val linkAttr: String = "href",
     )
 
+    /**
+     * Кандидаты фильтров из уже загруженной страницы: сеть не нужна.
+     *
+     * Смотрит списки, флажки с подписями и ссылки-сортировки; мусор вроде «Все»
+     * и «Сбросить» в значения не попадает. Подписи берутся из разметки как есть.
+     */
+    fun scanFilters(doc: Document): List<FilterSpec> {
+        val found = mutableListOf<FilterSpec>()
+        for (select in doc.select("select").take(MAX_FILTERS)) {
+            val key = select.attr("name").ifBlank { select.id() }
+            if (key.isBlank()) continue
+            val options = select.select("option")
+                .map { it.attr("value").ifBlank { it.text().trim() } to it.text().trim() }
+                .filter { (value, label) -> value.isNotBlank() && label !in JUNK_LABELS }
+                .take(MAX_OPTIONS)
+                .map { (value, label) -> FilterOption(label, value) }
+            if (options.size < MIN_OPTIONS) continue
+            found.add(
+                FilterSpec(
+                    name = filterName(doc, select, key),
+                    type = FilterSpec.TYPE_SELECT,
+                    key = key,
+                    options = options,
+                    selector = blockSelector(select),
+                ),
+            )
+        }
+        for ((key, inputs) in doc.select("input[type=checkbox], input[type=radio]")
+            .groupBy { it.attr("name") }
+            .filterKeys { it.isNotBlank() }
+            .take(MAX_FILTERS - found.size)) {
+            val options = inputs.mapNotNull { input ->
+                val label = labelOf(input) ?: return@mapNotNull null
+                val value = input.attr("value").ifBlank { label }
+                if (label in JUNK_LABELS || value.isBlank()) null else FilterOption(label, value)
+            }.take(MAX_OPTIONS)
+            if (options.size < MIN_OPTIONS) continue
+            val radio = inputs.first().attr("type") == "radio"
+            found.add(
+                FilterSpec(
+                    name = filterName(doc, inputs.first(), key),
+                    type = FilterSpec.TYPE_CHECK,
+                    key = key,
+                    maxSelected = if (radio) 1 else 0,
+                    options = options,
+                    selector = blockSelector(inputs.first()),
+                ),
+            )
+        }
+        sortLinks(doc)?.let { found.add(it) }
+        return found
+    }
+
+    /** Подпись фильтра: связанный label, иначе имя параметра. */
+    private fun filterName(doc: Document, element: Element, key: String): String {
+        val id = element.id()
+        val label = if (id.isBlank()) null else doc.selectFirst("label[for=$id]")?.text()?.trim()
+        return label?.takeIf { it.isNotBlank() } ?: key
+    }
+
+    /** Подпись флажка: label[for=id], объемлющий label или соседний текст. */
+    private fun labelOf(input: Element): String? {
+        val id = input.id()
+        val direct = if (id.isBlank()) null else input.ownerDocument().selectFirst("label[for=$id]")
+        return (direct?.text() ?: input.closest("label")?.text())?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    /** Ссылки-сортировки: одинаковый параметр с разными значениями. */
+    private fun sortLinks(doc: Document): FilterSpec? {
+        val links = doc.select("a[href]")
+            .filter { SORT_PARAM in it.attr("href") }
+            .map { it.text().trim() to it.attr("href").substringAfter('?', "") }
+            .filter { (label, value) -> label.isNotBlank() && value.isNotBlank() && label !in JUNK_LABELS }
+            .distinctBy { it.second }
+            .take(MAX_OPTIONS)
+        if (links.size < MIN_OPTIONS) return null
+        return FilterSpec(
+            name = "Сортировка",
+            type = FilterSpec.TYPE_SORT,
+            key = "sort",
+            options = links.map { (label, value) -> FilterOption(label, value) },
+        )
+    }
+
+    /** Короткий селектор блока: id целиком, иначе первый класс. */
+    private fun blockSelector(element: Element): String? {
+        var node: Element? = element
+        repeat(3) {
+            node = node?.parent() ?: return null
+            val id = node!!.id()
+            if (id.isNotBlank()) return "#" + id + " " + element.tagName()
+            val cls = node!!.className().trim().split(' ').firstOrNull { it.isNotBlank() }
+            if (cls != null) return node!!.tagName() + "." + cls + " " + element.tagName()
+        }
+        return null
+    }
+
     companion object {
         private const val MIN_CARDS = 6
         private const val DETAIL_SAMPLES = 4
@@ -444,6 +544,17 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
 
         private val NUMBER = Regex("""\d{1,4}""")
         private val PAGE_QUERY = Regex("""[?&]page=\d""")
+
+        /** Слова-помехи: такие пункты не становятся значениями фильтров. */
+        private val JUNK_LABELS = setOf(
+            "все", "сбросить", "выбрать", "сброс", "любой", "любая", "любое",
+            "по умолчанию", "не выбрано", "выберите", "--", "—",
+        )
+
+        private const val MAX_FILTERS = 12
+        private const val MAX_OPTIONS = 60
+        private const val MIN_OPTIONS = 2
+        private const val SORT_PARAM = "sort"
     }
 }
 
