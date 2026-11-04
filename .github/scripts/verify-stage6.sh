@@ -145,6 +145,17 @@ if [ -f "$TAKAMI/Sweep.kt" ]; then
     else
         ok S9 "прогон запускается только с экрана"
     fi
+
+    # Второй запуск с экрана не должен поднимать второй прогон: на живом
+    # устройстве два нажатия подряд дали по две строки на сайт.
+    if grep -q 'private var running' "$UI/SweepScreenModel.kt" && \
+        grep -q 'if (running) return' "$UI/SweepScreenModel.kt" && \
+        [ "$(grep -n 'running = true' "$UI/SweepScreenModel.kt" | cut -d: -f1)" -lt \
+          "$(grep -n 'screenModelScope.launch' "$UI/SweepScreenModel.kt" | cut -d: -f1)" ]; then
+        ok S10 "повторный запуск блокируется до старта прогона"
+    else
+        bad S10 "нет защиты от двойного запуска прогона"
+    fi
 else
     bad S1 "нет takami/Sweep.kt"
 fi

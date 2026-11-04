@@ -155,7 +155,7 @@ class SweepScreen : Screen() {
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 Text(
-                                    text = "Сейчас: ${current.host}",
+                                    text = "Сейчас: ${current.host.ifEmpty { "подготовка" }}",
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
                             }

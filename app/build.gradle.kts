@@ -23,7 +23,7 @@ android {
 
     defaultConfig {
         applicationId = "com.tadami.aurora"
-        versionCode = 219
+        versionCode = 220
 
         versionName = "0.63.2"
 

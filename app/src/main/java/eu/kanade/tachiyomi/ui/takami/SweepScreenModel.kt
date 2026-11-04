@@ -40,6 +40,10 @@ class SweepScreenModel(
     private val _state = MutableStateFlow<SweepState>(SweepState.NoList(Sweep.LIST))
     val state: StateFlow<SweepState> = _state.asStateFlow()
 
+    /** Прогон уже идёт. Флаг ставится до запуска корутины, иначе второе нажатие
+     *  успевает проскочить проверку состояния и прогон идёт двумя копиями. */
+    private var running = false
+
     fun refresh(dir: File) {
         val list = File(dir, Sweep.LIST)
         val sites = readSites(list)
@@ -52,7 +56,7 @@ class SweepScreenModel(
     }
 
     fun start(dir: File) {
-        if (_state.value is SweepState.Running) return
+        if (running) return
         val list = File(dir, Sweep.LIST)
         val sites = readSites(list)
         if (sites.isEmpty()) {
@@ -61,26 +65,32 @@ class SweepScreenModel(
         }
         val out = File(dir, Sweep.FILE)
         val total = sites.size
+        running = true
+        _state.value = SweepState.Running(done = readDone(out), total = total, host = "")
         screenModelScope.launch {
-            var ok = 0
-            var failed = 0
-            // Итог известен только когда сайт пройден целиком: считаем по ходу.
-            val outcomes = sweep.run(
-                sites = sites,
-                out = out,
-                onProgress = { done, all, outcome ->
-                    if (outcome.ok) ok++ else failed++
-                    _state.value = SweepState.Running(done = done, total = all, host = outcome.host)
-                },
-            )
-            // Продолжение после прерывания приносит только новые строки: досчитываем
-            // по файлу, иначе счётчик покажет меньше, чем реально пройдено.
-            if (outcomes.isEmpty()) {
-                val summary = summarize(out)
-                ok = summary.first
-                failed = summary.second
+            try {
+                var ok = 0
+                var failed = 0
+                // Итог известен только когда сайт пройден целиком: считаем по ходу.
+                val outcomes = sweep.run(
+                    sites = sites,
+                    out = out,
+                    onProgress = { done, all, outcome ->
+                        if (outcome.ok) ok++ else failed++
+                        _state.value = SweepState.Running(done = done, total = all, host = outcome.host)
+                    },
+                )
+                // Продолжение после прерывания приносит только новые строки: досчитываем
+                // по файлу, иначе счётчик покажет меньше, чем реально пройдено.
+                if (outcomes.isEmpty()) {
+                    val summary = summarize(out)
+                    ok = summary.first
+                    failed = summary.second
+                }
+                _state.value = SweepState.Finished(ok = ok, failed = failed, file = out.absolutePath)
+            } finally {
+                running = false
             }
-            _state.value = SweepState.Finished(ok = ok, failed = failed, file = out.absolutePath)
         }
     }
 
