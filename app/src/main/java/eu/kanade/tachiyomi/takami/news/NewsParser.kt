@@ -131,7 +131,9 @@ object NewsParser {
         // вычитание по тексту зависит от пробелов в разметке.
         val snippetCard = card.clone()
         snippetCard.select(spec.linkSelector.ifBlank { "a[href]" }).remove()
-        spec.dateSelector?.takeIf { it.isNotBlank() }?.let { snippetCard.select(it).remove() }
+        // Дата у карточки может стоять и без селектора в спеке: убираем её
+        // по типовым признакам, чтобы она не попала в анонс.
+        if (spec.dateSelector.isNullOrBlank()) snippetCard.select("time, [class*=date]").remove()
         return NewsItem(
             url = url,
             title = title,
