@@ -83,10 +83,22 @@ object Chain {
         dubbing: String,
         budget: Budget = Budget(spec.video.maxRequests),
         fetch: suspend (String) -> String?,
-        post: RelayPost = { url, body, referer ->
-            // Сеть общая с приложением: лимиты, паузы и повторы — её.
-            runCatching { Fetcher.get().post(url, body, referer) }.getOrNull()
-        },
+    ): ChainResult = collect(spec, html, pageUrl, dubbing, budget, appPost(), fetch)
+
+    /**
+     * Тот же обход с явным запросом с телом.
+     *
+     * Запрос нужен там, где плеер отдаёт ссылки только ответом на POST.
+     * Отдельный вход, чтобы вызывающие со своим [fetch] не менялись.
+     */
+    suspend fun collect(
+        spec: SiteSpec,
+        html: String,
+        pageUrl: String,
+        dubbing: String,
+        budget: Budget,
+        post: RelayPost,
+        fetch: suspend (String) -> String?,
     ): ChainResult {
         if (html.isBlank()) return ChainResult(blocked = true)
         val links = mutableListOf<QualityLink>()
@@ -143,6 +155,11 @@ object Chain {
             Drafts.candidates(spec, page, url).forEach { queue.addLast(it to depth + 1) }
         }
         return ChainResult(Quality.byUrl(links).distinctBy { it.url }, blocked)
+    }
+
+    /** Запрос с телом через сетевой слой приложения: лимиты, паузы, повторы. */
+    private fun appPost(): RelayPost = { url, body, referer ->
+        runCatching { Fetcher.get().post(url, body, referer) }.getOrNull()
     }
 
     /** Карта от плеера по шаблону из спеки: отдельный запрос, один раз. */

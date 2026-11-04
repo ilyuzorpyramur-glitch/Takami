@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.takami.video
 import eu.kanade.tachiyomi.takami.CatalogSpec
 import eu.kanade.tachiyomi.takami.SiteSpec
 import eu.kanade.tachiyomi.takami.VideoSpec
+import eu.kanade.tachiyomi.takami.video.kodik.KodikFixture
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
@@ -16,9 +17,6 @@ import org.junit.jupiter.api.Test
  * ссылками.
  */
 class RelayChainTest {
-
-    private fun fixture(name: String): String =
-        javaClass.getResource("/kodik/" + name)?.readText().orEmpty()
 
     private val pageUrl = "https://site.example/667-title.html"
 
@@ -46,7 +44,7 @@ class RelayChainTest {
     fun `реле приводит к ссылкам плеера`() = runBlocking {
         val pages = mapOf(
             "https://site.example/engine/ajax/controller.php?mod=player&id=667&slot=0" to relay,
-            player to fixture("player.html"),
+            player to KodikFixture.pageHtml,
         )
 
         val result = Chain.collect(
@@ -54,8 +52,9 @@ class RelayChainTest {
             html = card,
             pageUrl = pageUrl,
             dubbing = "",
+            budget = Budget(16),
             fetch = { pages[it] },
-            post = { _, _, _ -> fixture("ftor.json") },
+            post = { _, _, _ -> KodikFixture.ftorJson },
         )
 
         result.links.map { it.quality }.shouldContainExactly(listOf("360p", "480p", "720p"))
@@ -67,7 +66,7 @@ class RelayChainTest {
     fun `без ответа на запрос ссылок нет, но и падения нет`() = runBlocking {
         val pages = mapOf(
             "https://site.example/engine/ajax/controller.php?mod=player&id=667&slot=0" to relay,
-            player to fixture("player.html"),
+            player to KodikFixture.pageHtml,
         )
 
         val result = Chain.collect(
@@ -75,6 +74,7 @@ class RelayChainTest {
             html = card,
             pageUrl = pageUrl,
             dubbing = "",
+            budget = Budget(16),
             fetch = { pages[it] },
             post = { _, _, _ -> null },
         )
@@ -86,7 +86,7 @@ class RelayChainTest {
     fun `потолок запросов останавливает обход`() = runBlocking {
         val pages = mapOf(
             "https://site.example/engine/ajax/controller.php?mod=player&id=667&slot=0" to relay,
-            player to fixture("player.html"),
+            player to KodikFixture.pageHtml,
         )
 
         val result = Chain.collect(
@@ -96,7 +96,7 @@ class RelayChainTest {
             dubbing = "",
             budget = Budget(1),
             fetch = { pages[it] },
-            post = { _, _, _ -> fixture("ftor.json") },
+            post = { _, _, _ -> KodikFixture.ftorJson },
         )
 
         result.links shouldBe emptyList()

@@ -2,23 +2,21 @@ package eu.kanade.tachiyomi.takami.video.kodik
 
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
 
 /**
  * Разбор страницы Kodik и ответа плеера: без сети.
  *
- * Страницы взяты у живого плеера и лежат в ресурсах проверки: если
- * разметка изменится, тест скажет об этом раньше прогона на устройстве.
+ * Страница взята у живого плеера и лежит в [KodikFixture]: если разметка
+ * изменится, проверка скажет об этом раньше прогона на устройстве.
  */
 class KodikPageTest {
 
-    private fun fixture(name: String): String =
-        javaClass.getResource("/kodik/" + name)?.readText().orEmpty()
+    private val html: String get() = KodikFixture.pageHtml
 
-    private val html by lazy { fixture("player.html") }
-
-    private val response by lazy { fixture("ftor.json") }
+    private val response: String get() = KodikFixture.ftorJson
 
     @Test
     fun `страница плеера разбирается на три оси`() {
@@ -56,8 +54,8 @@ class KodikPageTest {
 
         page.translationUrl(translation, "https://player.example")
             .shouldStartWith("https://player.example/serial/78325/")
-        page.seriesUrl(translation, series, "https://player.example").shouldStartWith("https://player.example/serial/1")
-        page.seriesUrl(translation, series, "https://player.example").endsWith("/720p") shouldBe true
+        page.seriesUrl(translation, series, "https://player.example")
+            .shouldContain(series.hash + "/720p")
     }
 
     @Test
@@ -72,10 +70,11 @@ class KodikPageTest {
 
     @Test
     fun `закодированный адрес раскодируется, открытый остаётся собой`() {
-        val encoded = "iPZ0kPU6Tg9eUBQck29aj2ZrHO4cG29bT3UdjA9pANQeG0pVVsf5WExqZhsf"
+        val url = KodikLinks.decode(KodikFixture.encoded)
 
-        KodikLinks.decode(encoded).shouldStartWith("https://")
-        KodikLinks.decode("https://cdn.example/a.m3u8") shouldBe "https://cdn.example/a.m3u8"
+        url.shouldStartWith("https://")
+        url.shouldContain("/s/m/")
+        KodikLinks.decode("https://site.example/a.m3u8") shouldBe "https://site.example/a.m3u8"
         KodikLinks.decode("") shouldBe ""
         KodikLinks.decode("не base64!") shouldBe ""
     }
@@ -85,14 +84,14 @@ class KodikPageTest {
         val page = KodikPlayer.parse(html) ?: error("страница не разобралась")
         val body = KodikLinks.body(page)
 
-        body.contains("d=" + page.params["d"].orEmpty()) shouldBe true
-        body.contains("pd=" + page.params["pd"].orEmpty()) shouldBe true
-        body.contains("d_sign=") shouldBe true
-        body.contains("ref_sign=") shouldBe true
-        body.contains("id=" + page.video.id) shouldBe true
-        body.contains("hash=" + page.video.hash) shouldBe true
-        body.contains("type=seria") shouldBe true
-        body.contains("cdn_is_working=true") shouldBe true
+        body.shouldContain("d=" + page.params["d"].orEmpty())
+        body.shouldContain("pd=" + page.params["pd"].orEmpty())
+        body.shouldContain("d_sign=")
+        body.shouldContain("ref_sign=")
+        body.shouldContain("id=" + page.video.id)
+        body.shouldContain("hash=" + page.video.hash)
+        body.shouldContain("type=seria")
+        body.shouldContain("cdn_is_working=true")
     }
 
     @Test
@@ -101,8 +100,8 @@ class KodikPageTest {
         val series = page.series[2]
         val body = KodikLinks.body(page, series)
 
-        body.contains("id=" + series.id) shouldBe true
-        body.contains("hash=" + series.hash) shouldBe true
+        body.shouldContain("id=" + series.id)
+        body.shouldContain("hash=" + series.hash)
     }
 
     @Test
