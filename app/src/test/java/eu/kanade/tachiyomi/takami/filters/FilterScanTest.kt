@@ -3,7 +3,6 @@ package eu.kanade.tachiyomi.takami.filters
 import eu.kanade.tachiyomi.takami.FilterSpec
 import eu.kanade.tachiyomi.takami.Forge
 import io.kotest.matchers.collections.shouldHaveSize
-import io.kotest.matchers.nulls.shouldNotBe
 import io.kotest.matchers.shouldBe
 import org.jsoup.Jsoup
 import org.junit.jupiter.api.Test
@@ -50,7 +49,7 @@ class FilterScanTest {
         status.type shouldBe FilterSpec.TYPE_CHECK
         status.maxSelected shouldBe 1
         status.options shouldHaveSize 2
-        status.selector shouldNotBe null
+        status.selector shouldBe "div.checks input"
     }
 
     @Test
