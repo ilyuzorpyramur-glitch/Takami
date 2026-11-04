@@ -72,12 +72,22 @@ if [ -f "$TAKAMI/FilterSpec.kt" ]; then
     fi
 
     # В SiteSpec ровно одно новое поле: добавленные строки — только комментарий и filters.
+    # После слияния этапа в main база совпадает с веткой и дельта пустая:
+    # тогда проверяем, что поле filters в файле есть, и на этом успокаиваемся.
     ADDED=$(git diff "$BASE" -- "$TAKAMI/SiteSpec.kt" 2>/dev/null | grep '^+' | grep -v '^+++' | sed 's/^+//')
-    STRAY=$(printf '%s\n' "$ADDED" | grep -vE '^\s*(/\*\*.*|\*.*|val filters: List<FilterSpec> = emptyList\(\),|//.*)?$' | grep -v '^\s*$' | head -3)
-    if [ -n "$ADDED" ] && [ -z "$STRAY" ]; then
-        ok F1c "в SiteSpec добавлено только поле filters"
+    if [ -z "$ADDED" ]; then
+        if grep -qE '^\s*val filters: List<FilterSpec> = emptyList\(\),' "$TAKAMI/SiteSpec.kt"; then
+            ok F1c "в SiteSpec ровно одно новое поле filters (дельта пустая: этап уже в базе)"
+        else
+            bad F1c "в SiteSpec.kt нет поля filters с дефолтом"
+        fi
     else
-        bad F1c "в SiteSpec.kt чужие изменения: $(printf '%s' "$STRAY" | tr '\n' ' ')"
+        STRAY=$(printf '%s\n' "$ADDED" | grep -vE '^\s*(/\*\*.*|\*.*|val filters: List<FilterSpec> = emptyList\(\),|//.*)?$' | grep -v '^\s*$' | head -3)
+        if [ -z "$STRAY" ]; then
+            ok F1c "в SiteSpec добавлено только поле filters"
+        else
+            bad F1c "в SiteSpec.kt чужие изменения: $(printf '%s' "$STRAY" | tr '\n' ' ')"
+        fi
     fi
 else
     bad F1a "нет takami/FilterSpec.kt"
