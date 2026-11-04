@@ -29,6 +29,16 @@ object Dubbing {
     private val SPACES = Regex("""\s+""")
 
     /**
+     * Служебные слова перед номером серии.
+     *
+      * «Серия 5» — это подпись серии, а не студия озвучки.
+     */
+    private val EPISODE_WORDS = setOf(
+        "серия", "серии", "серий", "эпизод", "эпизоды", "сезон",
+        "часть", "выпуск", "series", "episode", "season", "part",
+    )
+
+    /**
      * Нормализация имени: без лишних пробелов и с
      * обрезанными скобками. */
     fun normalize(raw: String?): String = (raw ?: "")
@@ -44,6 +54,8 @@ object Dubbing {
         if (name.lowercase() in JUNK) return false
         // Подпись из одной цифры или из номера серии — не студия.
         if (name.all { it.isDigit() || it in " .-()" }) return false
+        val first = name.substringBefore(' ').trim(':', '.', '№', '-').lowercase()
+        if (first in EPISODE_WORDS) return false
         return name.any { it.isLetter() }
     }
 

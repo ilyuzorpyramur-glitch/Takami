@@ -33,6 +33,14 @@ object Quality {
     private val DIGITS = Regex("""(\d{3,4})""")
 
     /**
+     * Высоты кадра, которые действительно бывают у качества.
+     *
+      * Год выпуска и номер серии в этот набор не попадают,
+     * поэтому «2024» не превращается в 2024p.
+     */
+    private val HEIGHTS = setOf(144, 240, 360, 480, 540, 576, 720, 1080, 1440, 2160)
+
+    /**
      * Приводит подпись к одному словарю: «HD» → 720p, «720» → 720p.
      *
       * Мусорная подпись («видео», «плеер») даёт пустую
@@ -43,7 +51,7 @@ object Quality {
         val clean = (label ?: "").trim().trim('[', ']', '(', ')', '"', '\'')
         if (clean.isEmpty()) return ""
         val digits = DIGITS.find(clean)?.groupValues?.get(1)?.toIntOrNull()
-        if (digits != null && digits in 144..2160) return digits.toString() + "p"
+        if (digits != null && digits in HEIGHTS) return digits.toString() + "p"
         return when (clean.uppercase()) {
             "HD" -> "720p"
             "FHD", "FULLHD" -> "1080p"

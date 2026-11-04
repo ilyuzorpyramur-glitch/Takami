@@ -431,7 +431,7 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             if (key.isBlank()) continue
             val options = select.select("option")
                 .map { it.attr("value").ifBlank { it.text().trim() } to it.text().trim() }
-                .filter { (value, label) -> value.isNotBlank() && label !in JUNK_LABELS }
+                .filter { (value, label) -> value.isNotBlank() && !isJunk(label) }
                 .take(MAX_OPTIONS)
                 .map { (value, label) -> FilterOption(label, value) }
             if (options.size < MIN_OPTIONS) continue
@@ -454,7 +454,7 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             val options = inputs.mapNotNull { input ->
                 val label = labelOf(input) ?: return@mapNotNull null
                 val value = input.attr("value").ifBlank { label }
-                if (label in JUNK_LABELS || value.isBlank()) null else FilterOption(label, value)
+                if (isJunk(label) || value.isBlank()) null else FilterOption(label, value)
             }.take(MAX_OPTIONS)
             if (options.size < MIN_OPTIONS) continue
             val radio = inputs.first().attr("type") == "radio"
@@ -480,6 +480,14 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         return label?.takeIf { it.isNotBlank() } ?: key
     }
 
+    /**
+     * Служебная подпись: сравниваем без учёта регистра.
+     *
+      * В разметке «Все» и «все» — один и тот же пункт, а
+     * набор написан строчными.
+     */
+    private fun isJunk(label: String): Boolean = label.trim().lowercase() in JUNK_LABELS
+
     /** Подпись флажка: label[for=id], объемлющий label или соседний текст. */
     private fun labelOf(input: Element): String? {
         val id = input.id()
@@ -492,7 +500,7 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         val links = doc.select("a[href]")
             .filter { SORT_PARAM in it.attr("href") }
             .map { it.text().trim() to it.attr("href").substringAfter('?', "") }
-            .filter { (label, value) -> label.isNotBlank() && value.isNotBlank() && label !in JUNK_LABELS }
+            .filter { (label, value) -> label.isNotBlank() && value.isNotBlank() && !isJunk(label) }
             .distinctBy { it.second }
             .take(MAX_OPTIONS)
         if (links.size < MIN_OPTIONS) return null

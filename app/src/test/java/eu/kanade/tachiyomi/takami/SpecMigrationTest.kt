@@ -54,7 +54,7 @@ class SpecMigrationTest {
                 "host": "new.example",
                 "baseUrl": "https://new.example",
                 "name": "Новый",
-                "version": 2,
+                "version": ${SPEC_VERSION},
                 "futureField": { "a": 1 },
                 "catalog": { "itemSelector": "div.item", "smartPagination": true }
               }

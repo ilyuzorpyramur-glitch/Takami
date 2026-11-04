@@ -45,7 +45,9 @@ class SpecHistory(private val dir: File?) {
     fun rollback(host: String): SiteSpec? {
         val all = read().toMutableMap()
         val list = all[host].orEmpty()
-        if (list.isEmpty()) return null
+        // Откатывать некуда: текущая версия остаётся на месте,
+        // стирать историю нельзя.
+        if (list.size < 2) return null
         val back = list.drop(1)
         all[host] = back
         write(all)
