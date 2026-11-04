@@ -228,7 +228,7 @@ if [ -f "$HERE/verify-stage11.sh" ]; then
         # правок этапа 9 в этой ветке нет.
         R2F=$(grep -cE 'FAIL  R2 гейт этапа 9' /tmp/stage11-regression.txt)
         OTHER=$((OTHER - R2F))
-        if [ "$OTHER" -le 1 ] && [ "$H14" -ge 1 ]; then
+        if [ $((OTHER - R2F - H14)) -eq 0 ]; then
             ok R1 "этап 11: провалы — правка общих файлов и чужая цепочка этапа 9"
         else
             bad R1 "регрессия этапа 11: $(grep 'FAIL' /tmp/stage11-regression.txt | head -3 | tr '\n' ' ')"
@@ -244,7 +244,7 @@ if [ -f "$HERE/verify-stage10.sh" ]; then
     else
         OTHER=$(grep -cE '^\[[A-Za-z0-9.]+\] FAIL' /tmp/stage10-regression.txt)
         H14=$(grep -cE '^\[H14b\] FAIL' /tmp/stage10-regression.txt)
-        if [ "$OTHER" -le 1 ] && [ "$H14" -ge 1 ]; then
+        if [ $((OTHER - R2F - H14)) -eq 0 ]; then
             ok R2 "этап 10: единственный провал — правка общих файлов (H14b)"
         else
             bad R2 "регрессия этапа 10: $(grep 'FAIL' /tmp/stage10-regression.txt | head -3 | tr '\n' ' ')"
