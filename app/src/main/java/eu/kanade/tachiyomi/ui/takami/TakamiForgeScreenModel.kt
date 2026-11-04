@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.takami.Forge
 import eu.kanade.tachiyomi.takami.ForgeResult
 import eu.kanade.tachiyomi.takami.SiteSpec
 import eu.kanade.tachiyomi.takami.TakamiForge
+import eu.kanade.tachiyomi.takami.video.VideoStream
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +35,8 @@ sealed interface ForgeState {
         val checks: List<CheckResult>,
         val dubbings: List<String> = emptyList(),
         val qualities: List<String> = emptyList(),
+        /** Ссылки с двумя осями: экран показывает их без догадок. */
+        val streams: List<VideoStream> = emptyList(),
     ) : ForgeState
 }
 
@@ -71,6 +74,7 @@ class TakamiForgeScreenModel(
                     checks = result.checks,
                     dubbings = result.dubbings,
                     qualities = result.qualities,
+                    streams = result.streams,
                 )
                 is ForgeResult.Failure -> ForgeState.Failed(url, result.reason)
             }

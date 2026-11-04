@@ -36,10 +36,13 @@ import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.takami.Sweep
 
 /**
- * Прогон списка сайтов: то же, что делает стенд, но на телефоне и по файлу.
+  * Прогон списка сайтов: то же, что делает стенд, но на
+  * телефоне и по файлу.
  *
- * Экран не обещает результатов заранее: он показывает, сколько сайтов уже
- * пройдено и где лежит итог. Разбирать итог — дело того, кто ведёт проверку.
+  * Экран не обещает результатов заранее: он показывает,
+  * сколько сайтов уже
+  * пройдено и где лежит итог. Разбирать итог — дело того,
+  * кто ведёт проверку.
  */
 class SweepScreen : Screen() {
 
@@ -82,14 +85,18 @@ class SweepScreen : Screen() {
                     ) {
                         Text("Список", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            text = "Файл ${Sweep.LIST} в папке приложения: по одному адресу в строке. " +
-                                "Строки, начинающиеся с #, пропускаются. Сайты идут по одному, " +
-                                "с паузой ${Sweep.PAUSE_MS} мс — очередь запросов сайт видеть не должен.",
+                            text = "Файл ${Sweep.LIST} в папке приложения: по" +
+                                "одному адресу в строке." +
+                                "Строки, начинающиеся с #," +
+                                    "пропускаются. Сайты идут по одному," +
+                                "с паузой ${Sweep.PAUSE_MS} мс — очередь" +
+                                    "запросов сайт видеть не должен.",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
                             text = "Итог пишется в ${Sweep.FILE} после каждого сайта: " +
-                                "прерванный прогон продолжается с места, где остановился.",
+                                "прерванный прогон продолжается с" +
+                                    "места, где остановился.",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
@@ -104,7 +111,8 @@ class SweepScreen : Screen() {
                             ) {
                                 Text("Списка нет", style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                    text = "Положите файл по пути ${current.file} и вернитесь на этот экран.",
+                                    text = "Положите файл по пути ${current.file}" +
+                                        "и вернитесь на этот экран.",
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
                                 Button(onClick = { screenModel.refresh(context.filesDir) }) {
@@ -123,7 +131,8 @@ class SweepScreen : Screen() {
                                 Text("В списке ${current.total}", style = MaterialTheme.typography.titleMedium)
                                 if (current.done > 0) {
                                     Text(
-                                        text = "Уже пройдено ${current.done}: прогон продолжит дальше.",
+                                        text = "Уже пройдено ${current.done}:" +
+                                            "прогон продолжит дальше.",
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                 }
@@ -170,7 +179,8 @@ class SweepScreen : Screen() {
                             ) {
                                 Text("Прогон закончен", style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                    text = "Прошли все проверки: ${current.ok}. С замечаниями: ${current.failed}.",
+                                    text = "Прошли все проверки: ${current.ok}. С" +
+                                        "замечаниями: ${current.failed}.",
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
                                 Text(

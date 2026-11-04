@@ -35,8 +35,10 @@ import eu.kanade.tachiyomi.takami.fetch.Fetcher
 /**
  * Видимое окно проверки: один сайт, адрес на виду.
  *
- * Капчу решает человек в этом окне — приложение за него ничего не нажимает.
- * Ссылки на другие сайты уходят в системный браузер: окно всегда остаётся
+  * Капчу решает человек в этом окне — приложение за него
+  * ничего не нажимает.
+  * Ссылки на другие сайты уходят в системный браузер:
+  * окно всегда остаётся
  * окном одного домена.
  */
 class VerificationScreen(private val host: String) : Screen() {
@@ -71,8 +73,10 @@ class VerificationScreen(private val host: String) : Screen() {
             ) {
                 Text(text = host, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
                 Text(
-                    text = "Сайт просит подтвердить, что вы человек. Пройдите проверку в окне ниже " +
-                        "и нажмите «Готово». Приложение само ничего не нажимает.",
+                    text = "Сайт просит подтвердить, что вы" +
+                        "человек. Пройдите проверку в окне ниже" +
+                        "и нажмите «Готово». Приложение само" +
+                            "ничего не нажимает.",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )

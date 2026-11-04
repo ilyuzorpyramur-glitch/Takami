@@ -30,7 +30,8 @@ sealed interface SweepState {
 /**
  * Прогон списка сайтов на устройстве.
  *
- * Список читается из файла в filesDir — его кладёт тот, кто ведёт проверку.
+  * Список читается из файла в filesDir — его кладёт тот, кто
+  * ведёт проверку.
  * Приложение только проходит по строкам и пишет итог рядом, в JSONL.
  */
 class SweepScreenModel(
@@ -40,8 +41,11 @@ class SweepScreenModel(
     private val _state = MutableStateFlow<SweepState>(SweepState.NoList(Sweep.LIST))
     val state: StateFlow<SweepState> = _state.asStateFlow()
 
-    /** Прогон уже идёт. Флаг ставится до запуска корутины, иначе второе нажатие
-     *  успевает проскочить проверку состояния и прогон идёт двумя копиями. */
+    /**
+     * Прогон уже идёт. Флаг ставится до запуска корутины,
+     * иначе второе нажатие
+      * успевает проскочить проверку состояния и прогон
+      * идёт двумя копиями. */
     private var running = false
 
     fun refresh(dir: File) {
@@ -71,7 +75,8 @@ class SweepScreenModel(
             try {
                 var ok = 0
                 var failed = 0
-                // Итог известен только когда сайт пройден целиком: считаем по ходу.
+                // Итог известен только когда сайт пройден
+                // целиком: считаем по ходу.
                 val outcomes = sweep.run(
                     sites = sites,
                     out = out,
@@ -80,8 +85,10 @@ class SweepScreenModel(
                         _state.value = SweepState.Running(done = done, total = all, host = outcome.host)
                     },
                 )
-                // Продолжение после прерывания приносит только новые строки: досчитываем
-                // по файлу, иначе счётчик покажет меньше, чем реально пройдено.
+                // Продолжение после прерывания приносит только
+                // новые строки: досчитываем
+                // по файлу, иначе счётчик покажет меньше, чем
+                // реально пройдено.
                 if (outcomes.isEmpty()) {
                     val summary = summarize(out)
                     ok = summary.first

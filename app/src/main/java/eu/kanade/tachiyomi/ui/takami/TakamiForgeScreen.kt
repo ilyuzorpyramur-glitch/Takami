@@ -57,14 +57,17 @@ import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.takami.CheckResult
 import eu.kanade.tachiyomi.takami.SiteSpec
 import eu.kanade.tachiyomi.takami.TakamiForge
+import eu.kanade.tachiyomi.takami.video.VideoStream
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.flow.collectLatest
 import java.io.File
 
 /**
- * Мастер добавления источника: ссылка → иконка → предпросмотр → качество → озвучки → сохранение.
+  * Мастер добавления источника: ссылка → иконка →
+  * предпросмотр → качество → озвучки → сохранение.
  *
- * Каждый шаг показывает только то, что зависит от источника; ничего не обещает заранее.
+  * Каждый шаг показывает только то, что зависит от
+  * источника; ничего не обещает заранее.
  */
 class TakamiForgeScreen : Screen() {
 
@@ -137,7 +140,9 @@ class TakamiForgeScreen : Screen() {
         )
     }
 
-    /** Копируем выбранную картинку в файлы приложения: спека хранит только путь. */
+    /**
+     * Копируем выбранную картинку в файлы приложения:
+     * спека хранит только путь. */
     private fun copyIcon(context: Context, uri: android.net.Uri, host: String?): String? = runCatching {
         val dir = File(context.filesDir, "takami/icons").apply { mkdirs() }
         val file = File(dir, (host ?: "source") + ".png")
@@ -252,8 +257,10 @@ private fun UrlStep(
     onReset: () -> Unit,
 ) {
     Text(
-        "Вставь адрес сайта — приложение разберёт вёрстку, покажет предпросмотр " +
-            "и даст выбрать иконку, качество и озвучки. APK не собирается.",
+        "Вставь адрес сайта — приложение разберёт" +
+            "вёрстку, покажет предпросмотр" +
+            "и даст выбрать иконку, качество и озвучки. APK не" +
+                "собирается.",
         style = MaterialTheme.typography.bodyMedium,
     )
     OutlinedTextField(
@@ -297,7 +304,8 @@ private fun UrlStep(
 private fun IconStep(spec: SiteSpec, iconPath: String?, onPickIcon: () -> Unit) {
     Text("Иконка источника", style = MaterialTheme.typography.titleMedium)
     Text(
-        "Сейчас берётся иконка сайта. Можно выбрать свою картинку — она останется на устройстве.",
+        "Сейчас берётся иконка сайта. Можно выбрать свою" +
+            "картинку — она останется на устройстве.",
         style = MaterialTheme.typography.bodySmall,
     )
 
@@ -337,9 +345,13 @@ private fun PreviewStep(ready: ForgeState.Ready) {
             Text(ready.spec.name, style = MaterialTheme.typography.titleMedium)
             Text(ready.spec.baseUrl + " · " + ready.spec.engine, style = MaterialTheme.typography.bodySmall)
             if (ready.spec.catalog.latestPath != null) {
-                Text("Лента новинок: " + ready.spec.catalog.latestPath, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Лента новинок: " + ready.spec.catalog.latestPath,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             } else {
-                Text("Лента новинок не найдена — «Популярное» и «Новое» будут одинаковыми", style = MaterialTheme.typography.bodySmall)
+                Text("Лента новинок не найдена — «Популярное» и" +
+                    "«Новое» будут одинаковыми", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -361,24 +373,56 @@ private fun CheckRow(check: CheckResult) {
 @Composable
 private fun QualityStep(ready: ForgeState.Ready, quality: String, onQuality: (String) -> Unit) {
     Text("Качество", style = MaterialTheme.typography.titleMedium)
-    Text(
-        if (ready.qualities.isEmpty()) {
-            "Сайт не отдаёт список качеств для этого тайтла."
-        } else {
-            "Доступно: " + ready.qualities.joinToString(", ")
-        },
-        style = MaterialTheme.typography.bodySmall,
-    )
+    if (ready.qualities.isEmpty()) {
+        Text(
+            "Качество не определено — сайт не назвал ни" +
+                "одного варианта.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    } else {
+        Text("Доступно: " + ready.qualities.joinToString(", "), style = MaterialTheme.typography.bodySmall)
+    }
 
-    listOf("auto" to "Как отдаёт сайт", "max" to "Максимальное доступное").forEach { (value, label) ->
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onQuality(value) },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RadioButton(selected = quality == value, onClick = { onQuality(value) })
-            Text(label, style = MaterialTheme.typography.bodyMedium)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("auto" to "авто", "max" to "максимум").forEach { (value, label) ->
+            OutlinedButton(onClick = { onQuality(value) }) {
+                Text(if (quality == value) "· " + label else label)
+            }
+        }
+    }
+
+    if (ready.qualities.isNotEmpty()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ready.qualities.forEach { value ->
+                OutlinedButton(onClick = { onQuality(value) }) {
+                    Text(if (quality == value) "· " + value else value)
+                }
+            }
+        }
+    }
+
+    StreamsBlock(ready.streams)
+}
+
+/**
+ * Ссылки как есть: озвучка, качество и тип файла
+ * отдельными полями. */
+@Composable
+private fun StreamsBlock(streams: List<VideoStream>) {
+    Text("Ссылки", style = MaterialTheme.typography.titleSmall)
+    if (streams.isEmpty()) {
+        Text("Ссылок нет", style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    streams.forEach { stream ->
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(8.dp)) {
+                Text(
+                    stream.dubbingText + " · " + stream.qualityText + " · " + stream.kindText,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(stream.url, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            }
         }
     }
 }
@@ -393,7 +437,8 @@ private fun DubbingStep(
     Text("Озвучки", style = MaterialTheme.typography.titleMedium)
     if (ready.dubbings.isEmpty()) {
         Text(
-            "Сайт не отдаёт список озвучек в разметке — источник возьмёт то, что есть.",
+            "Сайт не различает озвучки — источник возьмёт" +
+                "то, что есть.",
             style = MaterialTheme.typography.bodySmall,
         )
     } else {
@@ -410,10 +455,7 @@ private fun DubbingStep(
             }
         }
     }
-
-    Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
-        Text("Сохранить источник")
-    }
+    Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) { Text("Сохранить источник") }
 }
 
 private fun loadBitmap(path: String): android.graphics.Bitmap? =
