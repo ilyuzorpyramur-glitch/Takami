@@ -3,6 +3,9 @@ package eu.kanade.tachiyomi.takami
 import eu.kanade.tachiyomi.takami.fetch.ChallengePageError
 import eu.kanade.tachiyomi.takami.fetch.HttpStatusError
 import eu.kanade.tachiyomi.takami.fetch.VerificationRequiredError
+import eu.kanade.tachiyomi.takami.news.NewsDetector
+import eu.kanade.tachiyomi.takami.news.NewsPolicy
+import eu.kanade.tachiyomi.takami.news.isStubPage
 import kotlinx.coroutines.Dispatchers
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
@@ -104,6 +107,16 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         }
         val hasIframe = detailDoc.selectFirst("iframe[src], iframe[data-src]") != null
 
+        // Новости: детект только если на уже загруженной странице есть ссылка
+        // на раздел. Дополнительный запрос — один, только на страницу раздела.
+        val newsCandidate = if (NewsPolicy.canDetect(host)) NewsDetector.findCandidate(doc, url) else null
+        val news = newsCandidate?.let { candidate ->
+            runCatching { engine.fetch(candidate.url) }.getOrNull()
+                ?.takeIf { !isStubPage(it) }
+                ?.let { NewsDetector.buildSpec(candidate, it, baseUrl) }
+        }
+        val newsCheckedAt = if (newsCandidate != null) System.currentTimeMillis() else 0L
+
         val spec = SiteSpec(
             host = host,
             baseUrl = baseUrl,
@@ -113,6 +126,9 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             // Фильтры сканируются там же, откуда взяты карточки: блок на главной
             // или в каталоге. Дальше их правят как обычные поля спеки.
             filters = scanFilters(doc),
+            // Новости — необязательный блок: null, если раздел не доказан.
+            news = news,
+            newsCheckedAt = newsCheckedAt,
             catalog = CatalogSpec(
                 path = basePath,
                 latestPath = latestPath,
@@ -278,7 +294,7 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         return result.distinctBy { it.selector }
     }
 
-    private fun signatureOf(node: Element): String? {
+    internal fun signatureOf(node: Element): String? {
         val tag = node.tagName()
         if (tag in SKIP_TAGS) return null
         val cls = node.className().trim().split(" ").firstOrNull { it.isNotBlank() }
@@ -403,7 +419,7 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         return EpisodeChoice("a[href]", null, "href")
     }
 
-    private fun selectorOf(element: Element): String? {
+    internal fun selectorOf(element: Element): String? {
         val cls = element.className().trim().split(" ").firstOrNull { it.isNotBlank() }
         return when {
             cls != null -> "." + cls
