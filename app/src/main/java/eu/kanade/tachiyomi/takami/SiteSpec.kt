@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.takami
 
+import eu.kanade.tachiyomi.takami.news.NewsSpec
 import eu.kanade.tachiyomi.takami.spec.SPEC_VERSION
 import kotlinx.serialization.Serializable
 
@@ -45,6 +46,16 @@ data class SiteSpec(
     val checksPassed: Int = 0,
     /** Озвучки, найденные в разметке: их показывает экран выбора. */
     val dubbingSpecs: List<DubbingSpec> = emptyList(),
+    /**
+     * Раздел новостей, найденный детектором; null — новостей нет,
+     * и это нормальный результат, а не ошибка.
+     */
+    val news: NewsSpec? = null,
+    /**
+     * Когда последний раз проверяли раздел новостей; ноль — не проверяли.
+     * Неудачная проверка тоже отмечается: повтор не раньше чем через неделю.
+     */
+    val newsCheckedAt: Long = 0L,
 ) {
     val sourceId: Long
         get() = TakamiForge.sourceIdOf(host)
