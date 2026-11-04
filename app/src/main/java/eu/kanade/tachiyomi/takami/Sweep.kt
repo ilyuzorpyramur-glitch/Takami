@@ -8,21 +8,26 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Прогон списка сайтов через генератор — то, что раньше делал стенд на компьютере.
+  * Прогон списка сайтов через генератор: то же, что раньше
+  * делал стенд.
  *
- * Список берётся из файла: сайты не зашиты в код, иначе список из отчёта и
- * список в прогоне разошлись бы при первой же правке. Один сайт за раз и
- * пауза между сайтами: тридцать три сайта подряд без пауз — это уже не
- * проверка, а нагрузка.
+ * Список берётся из файла: сайты не зашиты в код, иначе список из
+ * отчёта и список в прогоне разошлись бы при первой же правке.
+  * Один сайт за раз и пауза между сайтами: тридцать три
+  * сайта подряд
+ * без пауз — это уже не проверка, а нагрузка.
  *
- * Прогон можно прервать и продолжить: уже записанные строки не повторяются.
+  * Прогон можно прервать и продолжить: записанные строки
+  * не повторяются.
  */
 class Sweep(
     private val forge: Forge = Forge(),
     private val pause: Long = PAUSE_MS,
 ) {
 
-    /** Итог одного сайта. В отчёт идёт только то, что не жалко показать. */
+    /**
+     * Итог одного сайта. В отчёт идёт только то, что не жалко
+     * показать. */
     data class Outcome(
         val host: String,
         val url: String,
@@ -35,6 +40,12 @@ class Sweep(
         val checks: List<CheckResult>,
         val reason: String,
         val ms: Long,
+        /** Качества, найденные у сайта: пусто — ось не определена. */
+        val qualities: List<String> = emptyList(),
+        /** Озвучки, найденные у сайта: пусто — ось не определена. */
+        val dubbings: List<String> = emptyList(),
+        /** Плеер, через который отдаётся видео. */
+        val hoster: String = "",
     ) {
         fun toJson(): JSONObject = JSONObject().apply {
             put("host", host)
@@ -45,13 +56,19 @@ class Sweep(
             put("engine", engine)
             put("ms", ms)
             put("reason", reason)
+            // Две оси списками-строками: качество и озвучка не
+            // смешиваются.
+            put("qualities", qualities.joinToString(","))
+            put("dubbings", dubbings.joinToString(","))
+            put("hoster", hoster)
             put("checks", JSONArray().apply {
                 checks.forEach { check ->
                     put(
                         JSONObject().apply {
                             put("key", check.key)
                             put("ok", check.ok)
-                            // Заметка проверки — короткая фраза без названий тайтлов.
+                            // Заметка проверки — короткая фраза без
+                            // названий тайтлов.
                             put("note", check.note.take(NOTE_LIMIT))
                         },
                     )
@@ -61,10 +78,13 @@ class Sweep(
     }
 
     /**
-     * Прогоняет [sites] по очереди и дописывает строку в [out] после каждого сайта.
+      * Прогоняет [sites] по очереди и дописывает строку в [out]
+      * после каждого сайта.
      *
-     * Дописывание после каждого сайта — чтобы падение на середине не стоило
-     * всего прогона: продолжение подхватит начатое с того же файла.
+      * Дописывание после каждого сайта — чтобы падение на
+      * середине не стоило
+      * всего прогона: продолжение подхватит начатое с того
+      * же файла.
      */
     suspend fun run(
         sites: List<String>,
@@ -111,6 +131,9 @@ class Sweep(
                             checks = built.checks,
                             reason = "",
                             ms = ms,
+                            qualities = built.qualities,
+                            dubbings = built.dubbings,
+                            hoster = built.hoster,
                         )
                     }
                     is ForgeResult.Failure -> Outcome(
@@ -121,7 +144,8 @@ class Sweep(
                         name = "",
                         engine = "",
                         checks = emptyList(),
-                        // Причина уже сформулирована генератором, обрезаем по границе слова.
+                        // Причина уже сформулирована генератором,
+                        // обрезаем по границе слова.
                         reason = built.reason.take(REASON_LIMIT),
                         ms = ms,
                     )
@@ -161,13 +185,17 @@ class Sweep(
     }
 
     companion object {
-        /** Файл прогона в filesDir: забирается через adb, в сеть не уходит. */
+        /**
+         * Файл прогона в filesDir: забирается через adb, в сеть не
+         * уходит. */
         const val FILE = "sweep.jsonl"
 
         /** Файл со списком сайтов в filesDir: одна строка — один адрес. */
         const val LIST = "sites.txt"
 
-        /** Пауза между сайтами: сайт не должен видеть очередь запросов. */
+        /**
+         * Пауза между сайтами: сайт не должен видеть очередь
+         * запросов. */
         const val PAUSE_MS = 1500L
 
         private const val NOTE_LIMIT = 120

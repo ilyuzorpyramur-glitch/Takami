@@ -7,15 +7,20 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.io.File
 
-/** Сколько рабочих версий держим на источник: текущая и две прошлых. */
+/**
+ * Сколько рабочих версий держим на источник: текущая и
+ * две прошлых. */
 const val SPEC_HISTORY_LIMIT = 3
 
 /**
  * История последних рабочих версий каждой спеки.
  *
- * Лежит рядом со спеками в filesDir, поэтому переживает перезапуск. В голове
- * списка — текущая рабочая версия, за ней прошлые. Спека хранится целиком:
- * откат возвращает и путь к иконке, и озвучки, и качество, и фиды — ничего не
+  * Лежит рядом со спеками в filesDir, поэтому переживает
+  * перезапуск. В голове
+  * списка — текущая рабочая версия, за ней прошлые. Спека
+  * хранится целиком:
+  * откат возвращает и путь к иконке, и озвучки, и качество,
+  * и фиды — ничего не
  * собирается заново по кусочкам.
  */
 class SpecHistory(private val dir: File?) {
@@ -33,7 +38,8 @@ class SpecHistory(private val dir: File?) {
     fun latest(host: String): SiteSpec? = versions(host).firstOrNull()
 
     /**
-     * Откат: снимает текущую версию и возвращает предыдущую рабочую, делая её
+      * Откат: снимает текущую версию и возвращает
+      * предыдущую рабочую, делая её
      * текущей. null — откатывать некуда.
      */
     fun rollback(host: String): SiteSpec? {
@@ -46,7 +52,9 @@ class SpecHistory(private val dir: File?) {
         return back.firstOrNull()
     }
 
-    /** Источник удалён пользователем — его история больше не нужна. */
+    /**
+     * Источник удалён пользователем — его история больше
+     * не нужна. */
     fun forget(host: String) {
         val all = read().toMutableMap()
         if (all.remove(host) != null) write(all)
@@ -56,7 +64,8 @@ class SpecHistory(private val dir: File?) {
         val target = dir ?: return emptyMap()
         val file = File(target, FILE)
         if (!file.exists()) return emptyMap()
-        // Битый файл — это не повод терять источники: читаем как пустую историю.
+        // Битый файл — это не повод терять источники: читаем
+        // как пустую историю.
         return runCatching { json.decodeFromString(serializer, file.readText()) }
             .getOrDefault(emptyMap())
     }
@@ -85,7 +94,8 @@ class SpecHistory(private val dir: File?) {
 /**
  * Запись файла через временный файл и переименование.
  *
- * При сбое посреди записи старое содержимое остаётся целым: переименование
+  * При сбое посреди записи старое содержимое остаётся
+  * целым: переименование
  * подменяет файл целиком, а не переписывает его по частям.
  */
 internal fun writeAtomically(target: File, text: String) {

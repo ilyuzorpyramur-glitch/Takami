@@ -118,7 +118,8 @@ class Fetcher internal constructor(
     /**
      * Страница целиком: память, затем диск, затем сеть.
      *
-      * Одинаковые одновременные запросы склеиваются в один, свежая
+       * Одинаковые одновременные запросы склеиваются в
+       * один, свежая
       * запись с диска
       * отдаётся без обращения к сайту, просроченная проверяется
       * условным запросом.
@@ -239,7 +240,8 @@ class Fetcher internal constructor(
     /**
      * Отправка отчёта: нужен только код ответа, тело служебное.
      *
-     * Один проход через общий диспетчер: повторов здесь нет, иначе при
+      * Один проход через общий диспетчер: повторов здесь
+      * нет, иначе при
      * недоступном приёме запросы пошли бы подряд.
      */
     suspend fun postReport(url: String, body: String, token: String = ""): Int {
@@ -331,7 +333,8 @@ class Fetcher internal constructor(
     /**
      * Забирает cookie из видимого окна проверки в общий jar.
      *
-     * Так следующий запрос идёт уже с cookie, которую поставил сайт после
+      * Так следующий запрос идёт уже с cookie, которую
+      * поставил сайт после
      * проверки человеком.
      */
     fun acceptCookies(url: String, host: String) {
@@ -353,7 +356,8 @@ class Fetcher internal constructor(
     }
 
     /**
-     * Цепочка редиректов разворачивается по одному запросу: каждый
+      * Цепочка редиректов разворачивается по одному
+      * запросу: каждый
      * — под лимитами.
      */
     private suspend fun load(
@@ -390,7 +394,8 @@ class Fetcher internal constructor(
                 try {
                     gated = ResponseGate.check(raw.contentType, raw.bytes, raw.url)
                 } catch (e: ChallengePageError) {
-                    // Заглушка без явных заголовков: браузер пробуем один раз.
+                    // Заглушка без явных заголовков: браузер
+                    // пробуем один раз.
                     val host = hostOf(current)
                     if (browserPassed || passBrowser(raw.url, host) == null) {
                         refuse(host, raw.url, ProtectionLevel.CAPTCHA, "проверка браузера не пройдена")
@@ -428,7 +433,8 @@ class Fetcher internal constructor(
      *
       * Повтор идёт тем же путём, что и первая попытка: через
       * диспетчер лимитов и
-      * предохранитель. Своего клиента у повторов нет — иначе лимиты
+       * предохранитель. Своего клиента у повторов нет —
+       * иначе лимиты
       * обходились бы
      * одной строкой.
      */
@@ -460,7 +466,8 @@ class Fetcher internal constructor(
         if (breaker?.allow(host) == false) throw BreakerOpenError(host)
 
         val healthBefore = breaker?.state(host)?.state
-        // Пробный запрос после паузы: его неудача снова закрывает домен,
+        // Пробный запрос после паузы: его неудача снова
+        // закрывает домен,
         // и повтор внутри той же операции уже не имеет смысла.
         val probing = breaker?.state(host)?.state == BreakerState.HALF_OPEN
         val first = try {
@@ -476,7 +483,8 @@ class Fetcher internal constructor(
         noteHealth(host, healthBefore)
         if (first.protection.passed) return first
 
-        // Уровень A: настоящий браузер проходит проверку сам. Повтор — один.
+        // Уровень A: настоящий браузер проходит проверку сам.
+        // Повтор — один.
         if (first.protection.level == ProtectionLevel.BROWSER_CHECK) {
             if (passBrowser(first.url, host) != null) {
                 val again = try {
@@ -495,15 +503,18 @@ class Fetcher internal constructor(
         if (first.protection.level == ProtectionLevel.CAPTCHA) {
             refuse(host, first.url, ProtectionLevel.CAPTCHA, first.protection.reason)
         }
-        // Уровень C: отказ. Повторов нет, сайт помечается и ждёт человека.
+        // Уровень C: отказ. Повторов нет, сайт помечается и
+        // ждёт человека.
         refuse(host, first.url, ProtectionLevel.BLOCKED, first.protection.reason)
     }
 
     /**
      * Один проход к сайту: без повторов и без разбора защиты.
      *
-     * Возвращает ответ вместе с вердиктом о защите; решают, что с ним делать,
-     * выше — иначе повтор внутри повтора обходил бы и лимиты, и запрет на
+      * Возвращает ответ вместе с вердиктом о защите;
+      * решают, что с ним делать,
+      * выше — иначе повтор внутри повтора обходил бы и
+      * лимиты, и запрет на
      * «ещё одну попытку на удачу».
      */
     private suspend fun sendOnce(
@@ -570,7 +581,8 @@ class Fetcher internal constructor(
         val browser = challenges ?: return null
         val address = pageUrl.ifBlank { "https://" + host + "/" }
         val cookie = runCatching { browser.pass(address, host) }
-            .onFailure { logcat(LogPriority.DEBUG, it) { "Takami: проверка браузера сорвалась" } }
+            .onFailure { logcat(LogPriority.DEBUG, it) { "Takami: проверка браузера" +
+                "сорвалась" } }
             .getOrNull()
             ?: return null
         val parsed = ChallengeCookies.parse(host, cookie)
@@ -596,7 +608,8 @@ class Fetcher internal constructor(
     /**
      * Отчёт о сбое: шаг, тип ошибки и код ответа.
      *
-     * Тексты ошибок содержат адреса, поэтому наружу уходит только тип.
+      * Тексты ошибок содержат адреса, поэтому наружу
+      * уходит только тип.
      */
     private fun noteFailure(url: String, error: IOException) {
         val host = runCatching { hostOf(url) }.getOrDefault("")
@@ -759,7 +772,8 @@ class Fetcher internal constructor(
                 val app = context.applicationContext
                 val guard = HostGuard(budget ?: FileRequestBudget(app))
                 val breaker = CircuitBreaker(File(app.filesDir, BREAKER_FILE))
-                // Сбор отчётов стартует вместе с сетью: без адреса в сборке
+                // Сбор отчётов стартует вместе с сетью: без
+                // адреса в сборке
                 // он просто ничего не отправляет.
                 TakamiReports.start(app)
                 instance = Fetcher(
@@ -777,7 +791,8 @@ class Fetcher internal constructor(
 
         /**
          * Собирает клиент с тем же DNS over HTTPS, что и у общего клиента
-         * приложения: при блокировке DNS виртуальные источники должны работать
+          * приложения: при блокировке DNS виртуальные
+          * источники должны работать
          * так же, как обычные расширения.
          */
         internal fun buildClient(dohProvider: Int = NO_DOH): OkHttpClient {
@@ -796,7 +811,9 @@ class Fetcher internal constructor(
             return withDoh(builder, dohProvider).build()
         }
 
-        /** Выбор провайдера — ровно как в общем сетевом слое приложения. */
+        /**
+         * Выбор провайдера — ровно как в общем сетевом слое
+         * приложения. */
         internal fun withDoh(builder: OkHttpClient.Builder, provider: Int): OkHttpClient.Builder =
             when (provider) {
                 PREF_DOH_CLOUDFLARE -> builder.dohCloudflare()
@@ -815,7 +832,9 @@ class Fetcher internal constructor(
                 else -> builder
             }
 
-        /** Провайдер из настроек приложения; без настроек — системный DNS. */
+        /**
+         * Провайдер из настроек приложения; без настроек —
+         * системный DNS. */
         internal fun currentDohProvider(): Int = runCatching {
             Injekt.get<NetworkPreferences>().dohProvider().get()
         }.getOrDefault(NO_DOH)

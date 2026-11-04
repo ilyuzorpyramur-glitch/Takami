@@ -19,8 +19,10 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Проход проверки браузера так же, как это делает Chrome.
  *
- * Ничего не подменяем и не обходим: открываем настоящий WebView с включённым JS
- * и даём скрипту сайта поставить cookie. Возвращает строку cookie после
+  * Ничего не подменяем и не обходим: открываем настоящий
+  * WebView с включённым JS
+  * и даём скрипту сайта поставить cookie. Возвращает строку
+  * cookie после
  * проверки либо null, если сайт так и не пустил.
  */
 interface ChallengeBrowser {
@@ -31,8 +33,10 @@ interface ChallengeBrowser {
  * WebView для проверки браузера.
  *
  * Один WebView на домен одновременно: второй запрос ждёт первый, а не
- * открывает своё окно. Общий предел ожидания — [FetchLimits.CHALLENGE_TIMEOUT_MS].
- * При отмене корутины (пользователь ушёл с экрана) окно закрывается.
+  * открывает своё окно. Общий предел ожидания —
+  * [FetchLimits.CHALLENGE_TIMEOUT_MS].
+  * При отмене корутины (пользователь ушёл с экрана) окно
+  * закрывается.
  */
 class WebViewChallengeBrowser(private val context: Context) : ChallengeBrowser {
 
@@ -41,7 +45,8 @@ class WebViewChallengeBrowser(private val context: Context) : ChallengeBrowser {
     override suspend fun pass(url: String, host: String): String? {
         val lock = locks.getOrPut(host) { Mutex() }
         if (!lock.tryLock()) {
-            // Домен уже проходит проверку: второй раз окно не открываем.
+            // Домен уже проходит проверку: второй раз окно не
+            // открываем.
             return withTimeoutOrNull(FetchLimits.CHALLENGE_TIMEOUT_MS) { lock.withLock { null } }
         }
         return try {
@@ -58,7 +63,8 @@ class WebViewChallengeBrowser(private val context: Context) : ChallengeBrowser {
         val web = WebView(context.applicationContext).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            // Тот же браузерный агент, что у сетевого слоя: cookie проверки
+            // Тот же браузерный агент, что у сетевого слоя: cookie
+            // проверки
             // привязана к агенту, с другим она бесполезна.
             settings.userAgentString = Fetcher.USER_AGENT
             webViewClient = WebViewClient()

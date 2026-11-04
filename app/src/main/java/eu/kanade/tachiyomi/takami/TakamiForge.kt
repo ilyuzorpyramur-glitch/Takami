@@ -33,9 +33,11 @@ import rx.Observable
 import java.util.zip.CRC32
 
 /**
- * Источник, который живёт на устройстве: реализация [AnimeSource] поверх [SiteSpec].
+  * Источник, который живёт на устройстве: реализация
+  * [AnimeSource] поверх [SiteSpec].
  *
- * Для приложения он неотличим от APK-расширения: тот же интерфейс, та же карточка
+  * Для приложения он неотличим от APK-расширения: тот же
+  * интерфейс, та же карточка
  * источника, те же списки и плеер.
  */
 class VirtualAnimeSource(
@@ -71,8 +73,10 @@ class VirtualAnimeSource(
 
     override suspend fun getSeasonList(anime: SAnime): List<SAnime> = emptyList()
 
-    // Плеер в этом приложении спрашивает не видео напрямую, а хостеры.
-    // Отдаём один хостер — сам сайт — с уже разрешённым списком видео.
+    // Плеер в этом приложении спрашивает не видео
+    // напрямую, а хостеры.
+    // Отдаём один хостер — сам сайт — с уже разрешённым
+    // списком видео.
     override suspend fun getHosterList(episode: SEpisode): List<Hoster> {
         val videos = videos(episode)
         if (videos.isEmpty()) return emptyList()
@@ -105,7 +109,8 @@ class VirtualAnimeSource(
         private const val HOSTER_NAME = "Плеер сайта"
     }
 
-    // Устаревший Rx-путь: приложение ходит через корутины, но интерфейс требует реализацию.
+    // Устаревший Rx-путь: приложение ходит через корутины,
+    // но интерфейс требует реализацию.
     @Deprecated("Use getPopularAnime")
     override fun fetchPopularAnime(page: Int): Observable<AnimesPage> =
         Observable.fromCallable { runBlocking { getPopularAnime(page) } }
@@ -122,7 +127,8 @@ class VirtualAnimeSource(
 /**
  * Реестр источников, созданных в приложении.
  *
- * Спеки лежат одним JSON-файлом в filesDir: никуда не уходят, живут только у пользователя.
+  * Спеки лежат одним JSON-файлом в filesDir: никуда не уходят,
+  * живут только у пользователя.
  */
 object TakamiForge {
 
@@ -135,13 +141,15 @@ object TakamiForge {
     val specs: StateFlow<List<SiteSpec>> = _specs.asStateFlow()
 
     fun init(context: Context) {
-        // Сетевой слой готовим здесь же: до первого запроса к сайту он уже настроен.
+        // Сетевой слой готовим здесь же: до первого запроса к
+        // сайту он уже настроен.
         Fetcher.init(context)
         val target = File(context.filesDir, DIR).apply { mkdirs() }
         val first = dir == null
         dir = target
         val loaded = read(target)
-        // Перечитываем при каждом старте: файл мог появиться после первого вызова.
+        // Перечитываем при каждом старте: файл мог появиться
+        // после первого вызова.
         if (first || loaded.size != _specs.value.size) {
             logcat(LogPriority.DEBUG) { "Takami: источников на устройстве — " + loaded.size }
             _specs.value = loaded
@@ -152,7 +160,9 @@ object TakamiForge {
 
     fun sources(): List<AnimeSource> = _specs.value.map { VirtualAnimeSource(it, engine) }
 
-    /** Иконка источника: своя картинка, если выбрана, иначе иконка сайта. */
+    /**
+     * Иконка источника: своя картинка, если выбрана, иначе
+     * иконка сайта. */
     fun iconModelOf(sourceId: Long): Any? {
         val spec = _specs.value.firstOrNull { it.sourceId == sourceId } ?: return null
         val local = spec.iconPath?.let { java.io.File(it) }
@@ -169,16 +179,20 @@ object TakamiForge {
     /**
      * Сохраняет спеку и решает, оставить ли новую версию.
      *
-     * Правка считается удачной, только если источник проходит не меньше проверок,
-     * чем до неё. Иначе возвращается прошлая рабочая версия, а причина уходит в
-     * журнал: пользователь ничего не замечает, источник просто продолжает работать.
+      * Правка считается удачной, только если источник
+      * проходит не меньше проверок,
+      * чем до неё. Иначе возвращается прошлая рабочая
+      * версия, а причина уходит в
+      * журнал: пользователь ничего не замечает, источник
+      * просто продолжает работать.
      */
     suspend fun save(spec: SiteSpec, failedChecks: List<String> = emptyList()): SiteSpec =
         withContext(Dispatchers.IO) {
             val history = SpecHistory(dir)
             val candidate = spec.stamped()
             val previous = _specs.value.firstOrNull { it.host == candidate.host }
-            // Новая версия сначала становится рабочей: сравнить можно только с тем,
+            // Новая версия сначала становится рабочей:
+            // сравнить можно только с тем,
             // что уже записано.
             history.record(candidate)
             val decision = SpecRollback.apply(previous, candidate, failedChecks, SpecJournal(dir))
@@ -193,7 +207,8 @@ object TakamiForge {
             val next = _specs.value.filterNot { it.host == accepted.host } + accepted
             _specs.value = next
             write(next)
-            // Список источников фильтруется по включённым языкам: без этого шага
+            // Список источников фильтруется по включённым
+            // языкам: без этого шага
             // добавленный источник просто не появится в «Источниках».
             enableLanguage(accepted.lang)
             NetworkDiagnostics.noteSpecCheck(accepted.host, failedChecks.isEmpty(), failedChecks.size)
@@ -218,13 +233,17 @@ object TakamiForge {
         }.onFailure { logcat(LogPriority.ERROR, it) { "Takami: не включил язык " + lang } }
     }
 
-    /** Стабильный id: хост не меняется — не меняется и источник в библиотеке. */
+    /**
+     * Стабильный id: хост не меняется — не меняется и
+     * источник в библиотеке. */
     fun sourceIdOf(host: String): Long {
         val crc = CRC32().apply { update(("takami:" + host).toByteArray()) }
         return ID_BASE + (crc.value and 0x0000_FFFF_FFFFL)
     }
 
-    /** Чтение спек с подъёмом файлов старой установки до текущей версии схемы. */
+    /**
+     * Чтение спек с подъёмом файлов старой установки до
+     * текущей версии схемы. */
     private fun read(target: File): List<SiteSpec> {
         val file = File(target, FILE)
         if (!file.exists()) return emptyList()
@@ -233,7 +252,8 @@ object TakamiForge {
             logcat(LogPriority.ERROR) { "Takami: " + reason }
         }
         if (result.changed) {
-            // Файл без версии переписываем сразу: иначе миграция повторялась бы
+            // Файл без версии переписываем сразу: иначе
+            // миграция повторялась бы
             // при каждом запуске.
             runCatching { writeAtomically(file, SpecMigration.encode(result.specs)) }
         }
@@ -241,9 +261,11 @@ object TakamiForge {
     }
 
     /**
-     * Запись через временный файл: при сбое старый список остаётся целым.
+      * Запись через временный файл: при сбое старый список
+      * остаётся целым.
      *
-     * Версия схемы пишется рядом со спеками — по ней чтение понимает, что перед ним.
+      * Версия схемы пишется рядом со спеками — по ней
+      * чтение понимает, что перед ним.
      */
     private fun write(specs: List<SiteSpec>) {
         val target = dir ?: return

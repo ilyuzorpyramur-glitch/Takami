@@ -38,7 +38,9 @@ data class ReportsView(
 object NetworkDiagnostics {
     suspend fun report(): List<HostReport> = Fetcher.get().diagnostics()
 
-    /** Сколько отчётов в очереди и когда отправляли в прошлый раз. */
+    /**
+     * Сколько отчётов в очереди и когда отправляли в
+     * прошлый раз. */
     fun reports(): ReportsView {
         val status = TakamiReports.status()
         return ReportsView(
@@ -55,7 +57,9 @@ object NetworkDiagnostics {
 
     fun clearReports() = TakamiReports.clearQueue()
 
-    /** Провал проверки спеки после сохранения: точка сбора на стороне правки. */
+    /**
+     * Провал проверки спеки после сохранения: точка сбора
+     * на стороне правки. */
     fun noteSpecCheck(host: String, passed: Boolean, failed: Int) =
         TakamiReports.noteSpecCheck(host, passed, failed)
 
