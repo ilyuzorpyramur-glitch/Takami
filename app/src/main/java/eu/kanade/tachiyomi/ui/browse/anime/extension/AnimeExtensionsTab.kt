@@ -35,6 +35,8 @@ import eu.kanade.presentation.components.TabContent
 import eu.kanade.presentation.more.settings.screen.browse.AnimeExtensionStoreScreen
 import eu.kanade.tachiyomi.extension.anime.model.AnimeExtension
 import eu.kanade.tachiyomi.ui.browse.anime.extension.details.AnimeExtensionDetailsScreen
+import eu.kanade.tachiyomi.ui.takami.FilterScreen
+import eu.kanade.tachiyomi.ui.takami.HealScreen
 import eu.kanade.tachiyomi.ui.takami.SweepScreen
 import eu.kanade.tachiyomi.ui.takami.TakamiForgeScreen
 import eu.kanade.tachiyomi.ui.webview.WebViewScreen

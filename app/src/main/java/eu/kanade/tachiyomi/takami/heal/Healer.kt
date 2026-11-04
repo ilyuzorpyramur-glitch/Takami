@@ -4,6 +4,7 @@ import eu.kanade.tachiyomi.takami.CheckResult
 import eu.kanade.tachiyomi.takami.Forge
 import eu.kanade.tachiyomi.takami.ParseFailures
 import eu.kanade.tachiyomi.takami.SelfCheck
+import eu.kanade.tachiyomi.takami.ForgeResult
 import eu.kanade.tachiyomi.takami.SiteSpec
 import eu.kanade.tachiyomi.takami.TakamiForge
 import eu.kanade.tachiyomi.takami.spec.SpecJournalEntry
