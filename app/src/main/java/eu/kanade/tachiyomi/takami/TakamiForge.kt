@@ -11,6 +11,11 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.takami.fetch.Fetcher
 import eu.kanade.tachiyomi.takami.fetch.NetworkDiagnostics
+import eu.kanade.tachiyomi.takami.filters.FilterList
+import eu.kanade.tachiyomi.takami.filters.FilterState
+import eu.kanade.tachiyomi.takami.filters.FilterStore
+import eu.kanade.tachiyomi.takami.filters.FilterUrl
+import eu.kanade.tachiyomi.takami.filters.clean
 import eu.kanade.tachiyomi.takami.spec.SPEC_VERSION
 import eu.kanade.tachiyomi.takami.spec.SpecHistory
 import eu.kanade.tachiyomi.takami.spec.SpecJournal
@@ -50,21 +55,57 @@ class VirtualAnimeSource(
     override val lang: String = spec.lang
     override val supportsLatest: Boolean = true
 
-    override fun getFilterList(): AnimeFilterList = AnimeFilterList()
+    override fun getFilterList(): AnimeFilterList = FilterList.build(spec, FilterState(FilterStore.load(spec.host)))
 
     override suspend fun getPopularAnime(page: Int): AnimesPage {
-        val (animes, hasNext) = engine.catalogue(spec, page)
+        val state = FilterState(FilterStore.load(spec.host))
+        val (animes, hasNext) = if (state.isEmpty()) {
+            engine.catalogue(spec, page)
+        } else {
+            cataloguePage(spec.catalog.path, page, state)
+        }
         return AnimesPage(animes, hasNext)
     }
 
     override suspend fun getLatestUpdates(page: Int): AnimesPage {
-        val (animes, hasNext) = engine.latest(spec, page)
+        val state = FilterState(FilterStore.load(spec.host))
+        val (animes, hasNext) = if (state.isEmpty()) {
+            engine.latest(spec, page)
+        } else {
+            cataloguePage(spec.catalog.latestPath ?: spec.catalog.path, page, state)
+        }
         return AnimesPage(animes, hasNext)
     }
 
     override suspend fun getSearchAnime(page: Int, query: String, filters: AnimeFilterList): AnimesPage {
-        val (animes, hasNext) = engine.search(spec, page, query)
-        return AnimesPage(animes, hasNext)
+        // Экран поиска прислал пустой выбор — работает сохранённый.
+        val passed = FilterList.toState(filters, spec)
+        val state = if (passed.isEmpty()) FilterState(FilterStore.load(spec.host)) else passed
+        val search = spec.catalog.search
+        val base = if (search != null) {
+            spec.baseUrl + search.template.replace("{q}", java.net.URLEncoder.encode(query, "UTF-8"))
+        } else {
+            spec.baseUrl + spec.catalog.path
+        }
+        // Адрес собирается через FilterUrl и уходит в движок готовым:
+        // разбор остаётся в спеке, сигнатуры движка не меняются.
+        val url = FilterUrl.apply(
+            if (page <= 1) base else engine.pageUrl(base, "", spec.catalog.pagination, page),
+            spec,
+            state,
+        )
+        val parsed = engine.parseCatalogue(spec, engine.fetch(url), url)
+        // Выбор запоминается после успешного запроса: сорванный поиск ничего не меняет.
+        FilterStore.save(spec.host, state.clean(spec).values)
+        return AnimesPage(parsed.first, parsed.second)
+    }
+
+    /** Каталог с выбором: адрес из сохранённого, разбор — движком. */
+    private suspend fun cataloguePage(path: String, page: Int, state: FilterState): Pair<List<SAnime>, Boolean> {
+        val pageUrl = engine.pageUrl(spec.baseUrl, path, spec.catalog.pagination, page)
+        val url = FilterUrl.apply(pageUrl, spec, state)
+        val loaded = engine.fetchPage(url)
+        return engine.parseCatalogue(spec, loaded.html, loaded.url)
     }
 
     override suspend fun getAnimeDetails(anime: SAnime): SAnime = engine.details(spec, anime)
@@ -144,6 +185,8 @@ object TakamiForge {
         // Сетевой слой готовим здесь же: до первого запроса к
         // сайту он уже настроен.
         Fetcher.init(context)
+        // Выбор фильтров живёт рядом со спеками: filesDir/filters.json.
+        FilterStore.init(context.filesDir)
         val target = File(context.filesDir, DIR).apply { mkdirs() }
         val first = dir == null
         dir = target
