@@ -33,7 +33,7 @@ class NewsDetectorTest {
     fun `страница с тремя карточками даёт спеку`() {
         val spec = runBlocking { NewsDetector.detect(baseUrl, home) {  section  } }
 
-        spec shouldNotBeNull()
+        spec.shouldNotBeNull()
         spec!!.path shouldBe "/news/"
         spec.itemSelector shouldBe ".news-item"
     }

@@ -27,7 +27,7 @@ class NewsCacheTest {
 
         NewsCache.save(1L, NewsSnapshot(savedAt = 100L, items = listOf(item)))
 
-        NewsCache.load(1L) shouldNotBeNull()
+        NewsCache.load(1L).shouldNotBeNull()
         NewsCache.load(1L)!!.items.single().url shouldBe item.url
         NewsCache.load(1L)!!.savedAt shouldBe 100L
     }
