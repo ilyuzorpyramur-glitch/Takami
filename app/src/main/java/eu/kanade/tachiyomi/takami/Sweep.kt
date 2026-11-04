@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.takami
 
+import eu.kanade.tachiyomi.takami.heal.Healer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -46,6 +47,10 @@ class Sweep(
         val dubbings: List<String> = emptyList(),
         /** Плеер, через который отдаётся видео. */
         val hoster: String = "",
+        /** Источник лечился во время прогона: попытка была и чем кончилась. */
+        val healed: Boolean = false,
+        /** Код исхода лечения; пусто — лечения не было. */
+        val healReason: String = "",
     ) {
         fun toJson(): JSONObject = JSONObject().apply {
             put("host", host)
@@ -56,6 +61,8 @@ class Sweep(
             put("engine", engine)
             put("ms", ms)
             put("reason", reason)
+            put("healed", healed)
+            put("healReason", healReason)
             // Две оси списками-строками: качество и озвучка не
             // смешиваются.
             put("qualities", qualities.joinToString(","))
@@ -121,11 +128,24 @@ class Sweep(
                 when (built) {
                     is ForgeResult.Built -> {
                         val catalog = built.checks.firstOrNull { it.key == "catalog" }
+                        val checksFine = built.checks.isNotEmpty() && built.checks.all { it.ok }
+                        // Прогон — явное действие пользователя: сломанный источник
+                        // можно лечить прямо здесь, по общим правилам.
+                        var healed = false
+                        var healReason = ""
+                        if (!checksFine) {
+                            val saved = TakamiForge.specs.value.firstOrNull { it.host == host }
+                            if (saved != null) {
+                                val result = Healer().heal(saved, "sweep")
+                                healed = result.healed
+                                healReason = result.reason
+                            }
+                        }
                         Outcome(
                             host = host,
                             url = url,
                             catalogOk = catalog?.ok == true,
-                            ok = built.checks.isNotEmpty() && built.checks.all { it.ok },
+                            ok = checksFine,
                             name = built.spec.name,
                             engine = built.spec.engine,
                             checks = built.checks,
@@ -134,6 +154,8 @@ class Sweep(
                             qualities = built.qualities,
                             dubbings = built.dubbings,
                             hoster = built.hoster,
+                            healed = healed,
+                            healReason = healReason,
                         )
                     }
                     is ForgeResult.Failure -> Outcome(

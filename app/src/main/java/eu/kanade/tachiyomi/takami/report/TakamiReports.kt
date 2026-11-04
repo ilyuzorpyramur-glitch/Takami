@@ -143,6 +143,19 @@ object TakamiReports {
         )
     }
 
+    /** Событие лечения: часть и решение, без названий и текстов. */
+    fun noteHeal(host: String, part: String, decision: String) {
+        noteFailure(
+            host = host,
+            step = "heal",
+            error = decision.take(24),
+            health = if (decision == "accepted") "healthy" else "degraded",
+            code = null,
+            durationMs = 0L,
+            specVersion = 0,
+        )
+    }
+
     fun status(): ReportStatus = reporter?.status() ?: ReportStatus(active = false)
 
     fun setEnabled(value: Boolean) {

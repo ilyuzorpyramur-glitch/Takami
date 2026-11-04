@@ -9,6 +9,7 @@ import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.AddLink
 import androidx.compose.material.icons.outlined.PlaylistPlay
+import androidx.compose.material.icons.outlined.Healing
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -69,9 +70,14 @@ fun animeExtensionsTab(
                 onClick = { navigator.push(TakamiForgeScreen()) },
             ),
             AppBar.OverflowAction(
-                title = "Прогон сайтов",
-                icon = Icons.Outlined.PlaylistPlay,
-                onClick = { navigator.push(SweepScreen()) },
+                title = "Фильтры источников",
+                icon = Icons.Outlined.FilterList,
+                onClick = { navigator.push(FilterScreen()) },
+            ),
+            AppBar.OverflowAction(
+                title = "Починить источник",
+                icon = Icons.Outlined.Healing,
+                onClick = { navigator.push(HealScreen()) },
             ),
             AppBar.OverflowAction(
                 title = stringResource(MR.strings.action_filter),
