@@ -213,10 +213,12 @@ if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
         | grep -E "^\s{4}(suspend )?fun " | sed -E "$NAMES" | sort)
     NEW=$(git show "HEAD:app/src/main/java/eu/kanade/tachiyomi/takami/SpecEngine.kt" 2>/dev/null \
         | grep -E "^\s{4}(suspend )?fun " | sed -E "$NAMES" | sort)
-    if [ "$OLD" = "$NEW" ]; then
+    # Новый метод совместимость не ломает, пропавший — ломает.
+    GONE=$(comm -23 <(echo "$OLD") <(echo "$NEW") | tr '\n' ' ')
+    if [ -z "${GONE// /}" ]; then
         ok G7.1 "публичные методы SpecEngine на месте"
     else
-        bad G7.1 "набор публичных методов SpecEngine изменился"
+        bad G7.1 "пропали методы SpecEngine: $GONE"
     fi
 
     if git diff --quiet "$BASE"...HEAD -- gradle/libs.versions.toml; then
