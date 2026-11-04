@@ -2,6 +2,10 @@ package eu.kanade.tachiyomi.takami.video
 
 import eu.kanade.tachiyomi.takami.HosterSpec
 import eu.kanade.tachiyomi.takami.SiteSpec
+import eu.kanade.tachiyomi.takami.fetch.Fetcher
+import eu.kanade.tachiyomi.takami.video.kodik.KodikChain
+import eu.kanade.tachiyomi.takami.video.kodik.RelayPost
+import eu.kanade.tachiyomi.takami.video.relay.PlayerRelay
 import org.jsoup.Jsoup
 
 /**
@@ -79,6 +83,10 @@ object Chain {
         dubbing: String,
         budget: Budget = Budget(spec.video.maxRequests),
         fetch: suspend (String) -> String?,
+        post: RelayPost = { url, body, referer ->
+            // Сеть общая с приложением: лимиты, паузы и повторы — её.
+            runCatching { Fetcher.get().post(url, body, referer) }.getOrNull()
+        },
     ): ChainResult {
         if (html.isBlank()) return ChainResult(blocked = true)
         val links = mutableListOf<QualityLink>()
@@ -87,6 +95,8 @@ object Chain {
 
         val queue = ArrayDeque<Pair<String, Int>>()
         Drafts.candidates(spec, html, pageUrl).forEach { queue.addLast(it to 0) }
+        // Реле плеера: кадр собирается скриптом, в разметке его нет.
+        PlayerRelay.endpoints(html, pageUrl).forEach { queue.addLast(it to 0) }
         while (queue.isNotEmpty()) {
             val (url, depth) = queue.removeFirst()
             if (!budget.take()) break
@@ -100,6 +110,20 @@ object Chain {
             if (page.isNullOrBlank()) {
                 blocked = true
                 continue
+            }
+            // Ответ реле — адрес кадра плеера, а не страница: идём по нему.
+            val relayed = PlayerRelay.playerOf(page)
+            if (relayed != null) {
+                if (depth < spec.video.iframeDepth) queue.addLast(relayed to depth + 1)
+                continue
+            }
+            // Плеер Kodik ссылок в разметке не держит: только ответ на запрос.
+            if (KodikChain.looks(page)) {
+                val kodik = KodikChain.links(page, url, dubbing, budget, post)
+                if (kodik.isNotEmpty()) {
+                    links += kodik
+                    continue
+                }
             }
             val found = (mapFrom(spec, hoster, url, dubbing, budget, fetch) +
                 Drafts.links(spec, page, url, dubbing)).distinctBy { it.url }
