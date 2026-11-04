@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.takami.heal
 
 import eu.kanade.tachiyomi.takami.spec.SpecJournalEntry
 import io.kotest.matchers.shouldBe
+import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -47,11 +48,11 @@ class HealLogTest {
         HealLog.init(files)
         HealLog.write(entry("rejected", now))
 
-        val line = File(File(files, "takami"), "heal.jsonl").readText()
-        val keys = line.substringAfter('{').substringBefore('}')
-            .split(',').map { it.trim().trim('"').substringBefore(':') }
+        val line = File(File(files, "takami"), "heal.jsonl").readText().trim()
+        val keys = kotlinx.serialization.json.Json
+            .parseToJsonElement(line).jsonObject.keys
 
-        keys.toSet() shouldBe setOf("host", "part", "attempt", "decision", "reason", "before", "after", "trigger", "at")
+        keys shouldBe setOf("host", "part", "attempt", "decision", "reason", "before", "after", "trigger", "at")
     }
 
     @Test
