@@ -134,7 +134,7 @@ class SpecEngine(
         val animePage = fetchPage(anime.url)
         val doc = Jsoup.parse(animePage.html, animePage.url)
         val e = spec.episodes
-        val numberRegex = Regex(e.numberRegex)
+        val numberRegex = specRegex(e.numberRegex)
 
         val nodes = doc.select(e.itemSelector)
         logcat(LogPriority.DEBUG) {
@@ -314,7 +314,7 @@ class SpecEngine(
         track: String,
     ): List<QualityLink> {
         val result = mutableListOf<QualityLink>()
-        val labelled = Regex(spec.video.labelRegex)
+        val labelled = specRegex(spec.video.labelRegex)
         labelled.findAll(html).forEach { match ->
             val url = normalizeMedia(match.groupValues[2])
             if (url.isNotBlank()) {
@@ -471,6 +471,17 @@ class SpecEngine(
     }
 
     companion object {
+        /** Заведомо несовпадающий шаблон — замена битому выражению из спецификации. */
+        private val NEVER_MATCH = Regex("""(?!)""")
+
+        /**
+         * Шаблон приходит из спецификации, то есть из внешнего файла.
+         * Битое выражение не должно ронять плеер и прогон — просто
+         * перестаём совпадать.
+         */
+        private fun specRegex(pattern: String?): Regex =
+            runCatching { Regex(pattern.orEmpty()) }.getOrDefault(NEVER_MATCH)
+
         private val MEDIA_URL = Regex(
             """(?:https?:)?//[^\s"'<>]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"'<>]*)?""",
         )
