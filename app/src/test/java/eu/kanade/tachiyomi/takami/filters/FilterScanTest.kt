@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.takami.filters
 import eu.kanade.tachiyomi.takami.FilterSpec
 import eu.kanade.tachiyomi.takami.Forge
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.shouldNotBe
 import io.kotest.matchers.shouldBe
 import org.jsoup.Jsoup
 import org.junit.jupiter.api.Test
