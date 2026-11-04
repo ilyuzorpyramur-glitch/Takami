@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.ui.home
 import android.content.Context
 import eu.kanade.domain.discovery.service.DiscoveryPreferences
 import eu.kanade.tachiyomi.data.discovery.DiscoveryCandidatePolicy
+import eu.kanade.tachiyomi.data.discovery.DiscoveryStackSelector
 import eu.kanade.tachiyomi.data.discovery.DiscoveryUpdateJob
 import eu.kanade.tachiyomi.data.discovery.TasteSignalRecorder
 import eu.kanade.tachiyomi.data.discovery.dedupeCrossRow
@@ -126,12 +127,11 @@ internal class HomeDiscoveryController(
                         }
                         return@collectLatest
                     }
-                    val filtered = obs.visible
-                        .groupBy { it.rowType }
-                        .flatMap { (_, items) ->
-                            obs.policy.filterRowCandidates(items, { it.genres }, scoreSelector = { it.score })
-                        }
-                    cachedDiscoveryPool = dedupeCrossRow(filtered).filterNot { it.cleanTitle in dismissedSessionTitles }
+                    cachedDiscoveryPool = DiscoveryStackSelector.select(
+                        items = obs.visible,
+                        policy = obs.policy,
+                        dismissed = dismissedSessionTitles,
+                    )
                     val shownAtByTitle = runCatching {
                         repository.getRecentExclusionsWithTimestamp(mediaType)
                     }.getOrDefault(emptyMap())

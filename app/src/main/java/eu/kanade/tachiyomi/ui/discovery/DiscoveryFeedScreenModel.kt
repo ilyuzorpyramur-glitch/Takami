@@ -10,6 +10,7 @@ import eu.kanade.tachiyomi.data.discovery.CompositeTrendingSource
 import eu.kanade.tachiyomi.data.discovery.DiscoveryCandidatePolicy
 import eu.kanade.tachiyomi.data.discovery.DiscoveryLibraryAdder
 import eu.kanade.tachiyomi.data.discovery.DiscoveryRowItem
+import eu.kanade.tachiyomi.data.discovery.DiscoveryStackSelector
 import eu.kanade.tachiyomi.data.discovery.DiscoveryTrendingSource
 import eu.kanade.tachiyomi.data.discovery.DiscoveryUpdateJob
 import eu.kanade.tachiyomi.data.discovery.META_PREFETCH_COUNT
@@ -333,14 +334,12 @@ internal class DiscoveryFeedScreenModel(
                 .collectLatest { (all, refreshing, hidden, failedCsv, policy, consumed) ->
                     // Кросс-рядовой дедуп: упавший ряд живёт старым кэшем и может
                     // содержать тайтлы свежих рядов — приоритет у rowType.ordinal.
-                    val allowed = all.filter { item ->
-                        item.cleanTitle !in hidden && item.cleanTitle !in consumed && policy.isAllowed(item)
-                    }
-                    val visible = dedupeCrossRow(
-                        allowed.groupBy { it.rowType }
-                            .flatMap { (_, items) ->
-                                policy.filterRowCandidates(items, { it.genres }, scoreSelector = { it.score })
-                            },
+                    val allowed = all.filter { policy.isAllowed(it) }
+                    val visible = DiscoveryStackSelector.select(
+                        items = allowed,
+                        policy = policy,
+                        hidden = hidden,
+                        consumed = consumed,
                     )
                     val rows = groupFeedRows(visible)
                     val rowItems = rows.mapValues { (_, items) -> items.map { it.toRowItem() } }
