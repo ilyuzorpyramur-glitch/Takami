@@ -27,7 +27,9 @@ class HeadersTest {
 
     @Test
     fun `карта заголовков превращается в набор для запроса`() {
-        val headers = LinkHeaders.okhttp(mapOf("Referer" to "https://site.example/", "Origin" to "https://site.example"))
+        val headers = LinkHeaders.okhttp(
+            mapOf("Referer" to "https://site.example/", "Origin" to "https://site.example"),
+        )
 
         headers?.get("Referer") shouldBe "https://site.example/"
         headers?.size shouldBe 2
@@ -35,7 +37,8 @@ class HeadersTest {
 
     @Test
     fun `из спеки берутся только разрешённые заголовки`() {
-        val map = LinkHeaders.passable(SniffSpec(passHeaders = listOf("Referer", "Origin")), "https://site.example/ep/1")
+        val pass = SniffSpec(passHeaders = listOf("Referer", "Origin"))
+        val map = LinkHeaders.passable(pass, "https://site.example/ep/1")
 
         map["Referer"] shouldBe "https://site.example/ep/1"
         map["Origin"] shouldBe "https://site.example"
