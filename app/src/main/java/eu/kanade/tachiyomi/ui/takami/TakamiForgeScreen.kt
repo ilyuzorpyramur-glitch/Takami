@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -223,6 +224,7 @@ private fun ForgeContent(
             }
 
             if (saved.isNotEmpty()) {
+                val nav = LocalNavigator.currentOrThrow
                 HorizontalDivider()
                 Text("Мои источники", style = MaterialTheme.typography.titleSmall)
                 saved.forEach { spec ->
@@ -237,6 +239,9 @@ private fun ForgeContent(
                                     if (spec.dubbings.isEmpty()) "" else " · " + spec.dubbings.size + " озв.",
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                        }
+                        IconButton(onClick = { nav.push(FilterScreen(spec.host)) }) {
+                            Icon(Icons.Outlined.Tune, contentDescription = "Фильтры")
                         }
                         IconButton(onClick = { onRemove(spec) }) {
                             Icon(Icons.Outlined.Delete, contentDescription = "Удалить")
