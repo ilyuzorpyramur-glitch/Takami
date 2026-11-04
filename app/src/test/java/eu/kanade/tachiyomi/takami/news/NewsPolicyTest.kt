@@ -41,4 +41,23 @@ class NewsPolicyTest {
     fun `неизвестная лента не мертва`() {
         NewsPolicy.isDeadFeed("other.test", 0L) shouldBe false
     }
+
+    @Test
+    fun `непроверенный источник детектится сразу`() {
+        NewsPolicy.dueForDetect(0L, 1_800_000_000_000L) shouldBe true
+    }
+
+    @Test
+    fun `неудачную проверку повторяем через неделю`() {
+        val now = 1_800_000_000_000L
+        val checked = now - 60_000L
+
+        NewsPolicy.dueForDetect(checked, now) shouldBe false
+        NewsPolicy.dueForDetect(checked, checked + NewsPolicy.RETRY_AFTER_MS + 1) shouldBe true
+    }
+
+    @Test
+    fun `кэш живёт сорок пять минут`() {
+        NewsPolicy.TTL_MS shouldBe 45L * 60 * 1000
+    }
 }

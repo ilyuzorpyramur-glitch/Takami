@@ -31,7 +31,7 @@ class NewsDetectorTest {
 
     @Test
     fun `страница с тремя карточками даёт спеку`() {
-        val spec = runBlocking { NewsDetector.detect(baseUrl, home) {  section  } }
+        val spec = runBlocking { NewsDetector.detect(baseUrl, home) { section } }
 
         spec.shouldNotBeNull()
         spec!!.path shouldBe "/news/"
@@ -43,20 +43,22 @@ class NewsDetectorTest {
         val oneCard = section.replace("two.html\">Второй заголовок</a></div>", "")
             .replace("three.html\">Третий заголовок</a></div>", "")
 
-        runBlocking { NewsDetector.detect(baseUrl, home) {  oneCard  } }.shouldBeNull()
+        runBlocking { NewsDetector.detect(baseUrl, home) { oneCard } }.shouldBeNull()
     }
 
     @Test
     fun `404 и заглушка дают null`() {
-        runBlocking { NewsDetector.detect(baseUrl, home) {  null  } }.shouldBeNull()
-        runBlocking { NewsDetector.detect(baseUrl, home) {  "<html><body>RSS in offline mode</body></html>"  } }.shouldBeNull()
+        val stub = "<html><body>RSS in offline mode</body></html>"
+
+        runBlocking { NewsDetector.detect(baseUrl, home) { null } }.shouldBeNull()
+        runBlocking { NewsDetector.detect(baseUrl, home) { stub } }.shouldBeNull()
     }
 
     @Test
     fun `ссылка на раздел, ведущая на ту же страницу, даёт null`() {
         val self = home.replace("/news/\">Новости", "/\">Новости")
 
-        runBlocking { NewsDetector.detect(baseUrl, self) {  section  } }.shouldBeNull()
+        runBlocking { NewsDetector.detect(baseUrl, self) { section } }.shouldBeNull()
     }
 
     @Test
@@ -64,7 +66,7 @@ class NewsDetectorTest {
         val bare = "<html><body><p>Только каталог</p></body></html>"
         var fetched = 0
 
-        val spec = runBlocking { NewsDetector.detect(baseUrl, bare) {  fetched++; section  } }
+        val spec = runBlocking { NewsDetector.detect(baseUrl, bare) { fetched++; section } }
 
         spec.shouldBeNull()
         fetched shouldBe 0

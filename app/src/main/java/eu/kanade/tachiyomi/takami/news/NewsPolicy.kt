@@ -20,7 +20,7 @@ object NewsPolicy {
     const val RETRY_AFTER_MS = 7L * 24 * 60 * 60 * 1000
 
     /** Кэш ленты живёт 45 минут, между обновлениями показываем снимок. */
-    const val TTL_MS = 45L * 60 * 60 * 1000 / 60
+    const val TTL_MS = 45L * 60 * 1000
 
     /** Мёртвая лента не опрашивается неделю. */
     const val DEAD_FEED_MS = 7L * 24 * 60 * 60 * 1000
@@ -49,6 +49,15 @@ object NewsPolicy {
     /** Список лент не раздувается: место только для проверенных. */
     fun canAddFeed(host: String): Boolean =
         feeds.size < MAX_FEEDS && feedFor(host) == null
+
+    /**
+     * Пора ли проверять раздел снова.
+     *
+     * Ни разу не проверяли — пора. Проверяли и не нашли — ждём неделю:
+     * иначе каждая главная заново дёргала бы сайт, где новостей нет.
+     */
+    fun dueForDetect(checkedAt: Long, now: Long): Boolean =
+        checkedAt == 0L || now - checkedAt >= RETRY_AFTER_MS
 
     private val dead = HashMap<String, Long>()
 

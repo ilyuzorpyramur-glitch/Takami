@@ -20,6 +20,8 @@ import eu.kanade.tachiyomi.takami.heal.HealLog
 import eu.kanade.tachiyomi.takami.heal.HealResult
 import eu.kanade.tachiyomi.takami.heal.Healer
 import eu.kanade.tachiyomi.takami.heal.SpecPart
+import eu.kanade.tachiyomi.takami.news.NewsCache
+import eu.kanade.tachiyomi.takami.news.NewsSpec
 import eu.kanade.tachiyomi.takami.spec.SpecJournalEntry
 import eu.kanade.tachiyomi.takami.spec.SPEC_VERSION
 import eu.kanade.tachiyomi.takami.spec.SpecHistory
@@ -194,6 +196,9 @@ object TakamiForge {
         FilterStore.init(context.filesDir)
         // Журнал лечения — тоже файл рядом: попытки лечения пишутся туда.
         HealLog.init(context.filesDir)
+        // Кэш новостей: filesDir/news/<id>.json. Без этого вызова
+        // кэш молча выключен и каждая главная идёт в сеть заново.
+        NewsCache.init(context.filesDir)
         val target = File(context.filesDir, DIR).apply { mkdirs() }
         val first = dir == null
         dir = target
@@ -292,6 +297,23 @@ object TakamiForge {
         write(next)
         SpecHistory(dir).forget(host)
     }
+
+    /**
+     * Записывает только поля новостей: раздел и время проверки.
+     *
+     * Детект новостей — не правка спеки: версия схемы, история версий и
+     * счётчик проверок остаются прежними. Иначе каждое открытие главной
+     * добавляло бы запись в историю и портило статистику проверок.
+     */
+    suspend fun saveNews(spec: SiteSpec, news: NewsSpec?, checkedAt: Long): SiteSpec =
+        withContext(Dispatchers.IO) {
+            val current = _specs.value.firstOrNull { it.host == spec.host } ?: spec
+            val updated = current.copy(news = news, newsCheckedAt = checkedAt)
+            val next = _specs.value.filterNot { it.host == updated.host } + updated
+            _specs.value = next
+            write(next)
+            updated
+        }
 
     private fun enableLanguage(lang: String) {
         if (lang.isBlank()) return
