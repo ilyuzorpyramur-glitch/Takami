@@ -39,7 +39,7 @@ class NewsSpecCompatTest {
 
         val spec = json.decodeFromString(SiteSpec.serializer(), text)
 
-        spec.news shouldNotBeNull()
+        spec.news.shouldNotBeNull()
         spec.news!!.path shouldBe "/news/"
         spec.news!!.maxItems shouldBe 10
         spec.newsCheckedAt shouldBe 123L
