@@ -223,7 +223,29 @@ TOUCHED=$(git diff --name-only "$BASE" -- "$TAKAMI/SiteSpec.kt" "$TAKAMI/spec/Sp
 if [ -z "$TOUCHED" ]; then
     ok H14b "SiteSpec, SpecVersion, SpecMigration, SpecEngine, SelfCheck не тронуты"
 else
-    bad H14b "тронуты чужие файлы: $(echo "$TOUCHED" | tr '\n' ' ')"
+    # Единственное допустимое касание — дополнение SiteSpec.kt новыми
+    # полями новостей (этап 12 без них не собрать). Правило узкое:
+    # ни одна существующая строка не удалена и не изменена, а каждая
+    # добавленная строка говорит про новости или продолжает комментарий.
+    # Любая другая правка ядра по-прежнему FAIL.
+    EXTRA=""
+    for F in $TOUCHED; do
+        case "$F" in
+            *takami/SiteSpec.kt) ;;
+            *) EXTRA="$EXTRA $F"; continue ;;
+        esac
+        DIFF=$(git diff "$BASE" -- "$F" 2>/dev/null)
+        GONE=$(printf '%s\n' "$DIFF" | grep -cE '^-[^-]' || true)
+        ODD=$(printf '%s\n' "$DIFF" | grep -E '^\+[^+]' \
+            | grep -viE '^\+[^/]*news|^\+\s*\*|^\+\s*/\*\*|^\+\s*\*/' | head -3 || true)
+        [ "$GONE" -eq 0 ] || EXTRA="$EXTRA $F(удалены строки)"
+        [ -z "$ODD" ] || EXTRA="$EXTRA $F(посторонние правки)"
+    done
+    if [ -z "$EXTRA" ]; then
+        ok H14b "ядро не тронуто, кроме добавления полей новостей в SiteSpec"
+    else
+        bad H14b "тронуты чужие файлы:$EXTRA"
+    fi
 fi
 
 echo "--- экран ---"

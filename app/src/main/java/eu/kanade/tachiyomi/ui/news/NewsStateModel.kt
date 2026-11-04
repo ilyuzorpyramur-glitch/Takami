@@ -31,10 +31,17 @@ class NewsStateModel {
     /** Тихий проход: детект неразобранных источников и обновление протухшего кэша. */
     suspend fun sync(opening: Boolean, force: Boolean = false) {
         // Детект: только никогда не проверявшиеся источники, не больше двух
-        // за одно открытие главной. Неудачная проверка тоже отмечается.
+        // за одно открытие главной. Неудачная проверка тоже отмечается,
+        // повтор — не раньше чем через неделю.
         if (opening && detectedThisOpening < NewsPolicy.MAX_DETECT_PER_OPENING) {
+            val now = System.currentTimeMillis()
             val pending = TakamiForge.specs.value
-                .filter { NewsPolicy.canDetect(it.host) && it.news == null && it.newsCheckedAt == 0L }
+                .filter {
+                    NewsPolicy.canDetect(it.host) &&
+                        NewsPolicy.canAddFeed(it.host) &&
+                        it.news == null &&
+                        NewsPolicy.dueForDetect(it.newsCheckedAt, now)
+                }
                 .take(NewsPolicy.MAX_DETECT_PER_OPENING - detectedThisOpening)
             for (spec in pending) {
                 detectedThisOpening++
@@ -60,6 +67,8 @@ class NewsStateModel {
                 Fetcher.get().get(url, spec.baseUrl, FetchPriority.BACKGROUND)
             }
         }.getOrNull()
-        TakamiForge.save(spec.copy(news = news, newsCheckedAt = checkedAt), emptyList())
+        // Отдельная запись: детект раздела не правка спеки, историю
+        // версий и счётчик проверок он не трогает.
+        TakamiForge.saveNews(spec, news, checkedAt)
     }
 }
