@@ -1,1 +1,699 @@
-package eu.kanade.tachiyomi.data.discovery\n\nimport eu.kanade.tachiyomi.data.suggestions.SuggestionCoordinator\nimport eu.kanade.tachiyomi.data.suggestions.SuggestionSeed\nimport eu.kanade.tachiyomi.data.suggestions.SuggestionTitleResolver\nimport eu.kanade.tachiyomi.data.suggestions.sources.SuggestionMediaType\nimport eu.kanade.tachiyomi.data.suggestions.util.bestMatchScoreFor\nimport kotlinx.coroutines.async\nimport kotlinx.coroutines.awaitAll\nimport kotlinx.coroutines.supervisorScope\nimport kotlinx.coroutines.sync.Semaphore\nimport kotlinx.coroutines.sync.withPermit\nimport kotlinx.coroutines.withTimeoutOrNull\nimport tachiyomi.core.common.util.system.logcat\nimport tachiyomi.domain.discovery.model.DiscoveryMediaType\nimport tachiyomi.domain.discovery.model.DiscoveryRowType\nimport tachiyomi.domain.discovery.model.normalizeDiscoveryTitle\nimport java.io.IOException\n\ninternal const val SOURCE_FETCH_TIMEOUT_MS = 6_000L\n\n/** A provider with plenty of matching titles should fill a required row in one pass. */\nprivate const val MAX_REQUIRED_EXTERNAL_PAGES = 3\n\n/** Кандидаты LIKE-сида: resolver дополняет сырой тайтл оригиналом из описания и нормализованными вариантами. */\ninternal fun likeSeedCandidateTitles(seed: DiscoverySeedInput): List<String> =\n    (SuggestionTitleResolver.resolveCandidates(seed.title, seed.description) + seed.altTitles)\n        .filter { it.isNotBlank() }\n        .distinct()\n\n/**\n * Ряд «Похоже на X»: переиспользует существующий [SuggestionCoordinator]\n * (AniList / MAL-Jikan / MangaUpdates / NovelUpdates) на каждый выбранный сид.\n */\nclass DiscoveryLikeRowBuilder(\n    private val suggestionCoordinator: SuggestionCoordinator,\n    private val catalog: DiscoverySourceCatalog? = null,\n    private val includeExternal: Boolean = true,\n) : DiscoveryRowBuilder {\n\n    override val rowType = DiscoveryRowType.LIKE\n    override var isDegraded: Boolean = false\n        private set\n\n    override suspend fun build(context: DiscoveryBuildContext): List<DiscoveryRowItem> {\n        val mediaType = when (context.mediaType) {\n            DiscoveryMediaType.ANIME -> SuggestionMediaType.ANIME\n            DiscoveryMediaType.MANGA -> SuggestionMediaType.MANGA\n            DiscoveryMediaType.NOVEL -> SuggestionMediaType.NOVEL\n        }\n        if (includeExternal) {\n            var fullyFailedSeeds = 0\n            var hasFailedSources = false\n            val feedbackPerSeed = context.feedbackSeeds.map { feedbackSeed ->\n                val suggestionSeed = SuggestionSeed(\n                    mediaType = mediaType,\n                    primaryTitle = feedbackSeed.title,\n                    candidateTitles = SuggestionTitleResolver.resolveCandidates(feedbackSeed.title, null),\n                    description = null,\n                    author = null,\n                    genres = feedbackSeed.genres.ifEmpty { null },\n                )\n                val result = suggestionCoordinator.fetchSuggestions(\n                    suggestionSeed,\n                    limit = 25,\n                    releaseStatuses = context.releaseStatuses,\n                )\n                if (result.failedSources > 0) {\n                    hasFailedSources = true\n                }\n                if (result.items.isEmpty() && result.attemptedSources > 0 &&\n                    result.failedSources == result.attemptedSources\n                ) {\n                    fullyFailedSeeds++\n                }\n                result.items.map { item ->\n                    DiscoveryRowItem(\n                        title = item.title,\n                        cleanTitle = normalizeDiscoveryTitle(item.title),\n                        coverUrl = item.thumbnailUrl,\n                        reason = null,\n                        seedTitle = feedbackSeed.title,\n                        provider = item.providerName,\n                        score = item.bestMatchScoreFor(suggestionSeed).toDouble(),\n                        genres = item.genres,\n                    )\n                }\n            }\n            val libraryPerSeed = context.seeds.map { seed ->\n                val suggestionSeed = SuggestionSeed(\n                    mediaType = mediaType,\n                    primaryTitle = seed.title,\n                    candidateTitles = likeSeedCandidateTitles(seed),\n                    description = seed.description,\n                    author = seed.author,\n                    genres = seed.genres.ifEmpty { null },\n                )\n                val result = suggestionCoordinator.fetchSuggestions(\n                    suggestionSeed,\n                    limit = 25,\n                    releaseStatuses = context.releaseStatuses,\n                )\n                if (result.failedSources > 0) {\n                    hasFailedSources = true\n                }\n                if (result.items.isEmpty() && result.attemptedSources > 0 &&\n                    result.failedSources == result.attemptedSources\n                ) {\n                    fullyFailedSeeds++\n                }\n                result.items.map { item ->\n                    DiscoveryRowItem(\n                        title = item.title,\n                        cleanTitle = normalizeDiscoveryTitle(item.title),\n                        coverUrl = item.thumbnailUrl,\n                        // Локализованный текст «Похоже на „X“» композится на рендере из seedTitle.\n                        reason = null,\n                        seedTitle = seed.title,\n                        provider = item.providerName,\n                        score = item.bestMatchScoreFor(suggestionSeed).toDouble(),\n                        genres = item.genres,\n                    )\n                }\n            }\n            val perSeed = feedbackPerSeed + libraryPerSeed\n            val merged = mergeSeedResults(perSeed)\n            val totalSeeds = context.seeds.size + context.feedbackSeeds.size\n            if (hasFailedSources && merged.isNotEmpty()) {\n                isDegraded = true\n            }\n            if (merged.isEmpty() && totalSeeds > 0 && (fullyFailedSeeds == totalSeeds || hasFailedSources)) {\n                throw IOException("all suggestion providers failed for every seed")\n            }\n            return context.candidatePolicy.filterRowCandidates(merged, { it.genres })\n        } else {\n            if (catalog == null) return emptyList()\n            val sourceIds = context.sourceIds.filter { it > 0 }\n                .ifEmpty { listOf(context.sourceId).filter { it > 0 } }\n            if (sourceIds.isEmpty()) return emptyList()\n\n            val allSeeds = (\n                context.feedbackSeeds.map { it.title to it.genres } +\n                    context.seeds.map { it.title to it.genres }\n                ).filter { it.second.isNotEmpty() }\n            if (allSeeds.isEmpty()) return emptyList()\n\n            val perSeed = supervisorScope {\n                allSeeds.mapIndexed { seedIndex, (seedTitle, genres) ->\n                    async {\n                        val seedSources = if (sourceIds.size <= 2) {\n                            sourceIds\n                        } else {\n                            val start = (seedIndex * 2) % sourceIds.size\n                            listOf(sourceIds[start], sourceIds[(start + 1) % sourceIds.size])\n                        }\n                        seedSources.map { sourceId ->\n                            async {\n                                runCatchingUnlessCancelled {\n                                    withTimeoutOrNull(SOURCE_FETCH_TIMEOUT_MS) {\n                                        catalog.popularWithGenres(\n                                            context.mediaType,\n                                            sourceId,\n                                            genres = genres.take(3),\n                                            page = 1,\n                                            releaseStatuses = context.releaseStatuses,\n                                        )\n                                    }\n                                }.getOrNull().orEmpty()\n                            }\n                        }.awaitAll().flatten().map { item ->\n                            item.copy(\n                                seedTitle = seedTitle,\n                                reason = null,\n                            )\n                        }\n                    }\n                }.awaitAll()\n            }\n            val merged = mergeSeedResults(perSeed)\n            return context.candidatePolicy.filterRowCandidates(merged, { it.genres })\n        }\n    }\n}\n\n/**\n * Ряд «Тренды и сезон»: агрегатор трендов (Shikimori, MangaDex, Jikan, AniList)\n * и свежие обновления установленных источников.\n */\nclass DiscoveryTrendRowBuilder(\n    private val trending: DiscoveryTrendingSource,\n    private val catalog: DiscoverySourceCatalog,\n    private val seasonProvider: () -> TrendSeason,\n    private val sortProvider: () -> TrendSort,\n) : DiscoveryRowBuilder {\n\n    override val rowType = DiscoveryRowType.TREND\n\n    override suspend fun build(context: DiscoveryBuildContext): List<DiscoveryRowItem> {\n        val effectiveSort = when (context.mediaType) {\n            DiscoveryMediaType.ANIME -> sortProvider()\n            // Для манги и новелл запрашиваем реальные тренды (TRENDING_DESC),\n            // чтобы не дублировать статический all-time топ ряда TASTE\n            DiscoveryMediaType.MANGA, DiscoveryMediaType.NOVEL -> TrendSort.TRENDING\n        }\n        // C1: приоритет — топ-взвешенный источник библиотеки, иначе lastUsed/fallback.\n        val preferredSourceId = context.sourceIds.firstOrNull() ?: context.sourceId\n        val policy = context.candidatePolicy\n\n        val fromSource = if (context.mediaType == DiscoveryMediaType.NOVEL && preferredSourceId > 0) {\n            runCatchingUnlessCancelled {\n                catalog.latest(\n                    context.mediaType,\n                    preferredSourceId,\n                    page = context.pageOffset,\n                    releaseStatuses = context.releaseStatuses,\n                )\n            }.getOrNull().orEmpty().map { item ->\n                item.copy(\n                    reason = "source",\n                    score = 0.0,\n                )\n            }.let { items -> policy.filterRowCandidates(items, { it.genres }) }\n        } else {\n            emptyList()\n        }\n\n        val fromTrending = runCatchingUnlessCancelled {\n            trending.fetch(\n                mediaType = context.mediaType,\n                season = seasonProvider(),\n                sort = effectiveSort,\n                page = context.pageOffset,\n                releaseStatuses = context.releaseStatuses,\n            )\n        }.getOrNull().orEmpty()\n            .let { items -> policy.filterRowCandidates(items, { it.genres }) }\n            .map { item ->\n                DiscoveryRowItem(\n                    title = item.title,\n                    cleanTitle = item.cleanTitle,\n                    altCleanTitles = listOfNotNull(\n                        item.altTitle?.let {\n                            normalizeDiscoveryTitle(it)\n                        },\n                    ).filter { it.isNotBlank() },\n                    coverUrl = item.coverUrl,\n                    // Payload "current"/"next"/"source"/null — шаблон строки выбирается на рендере.\n                    reason = item.seasonLabel,\n                    seedTitle = null,\n                    provider = item.provider,\n                    score = 0.0,\n                    genres = item.genres,\n                )\n            }\n\n        if (context.releaseStatuses.isNotEmpty()) {\n            logcat {\n                "[Discovery] trend row media=${context.mediaType} trending=${fromTrending.size} " +\n                    "sourceLatest=${fromSource.size} statuses=${context.releaseStatuses}"\n            }\n        }\n\n        // Приоритетные жанры ранжируются единым within-row ranker'ом в policy.filterRowCandidates.\n\n        if (context.mediaType == DiscoveryMediaType.NOVEL) {\n            val combinedNovels = (fromSource + fromTrending).distinctBy { it.cleanTitle }\n            val filteredNovels = policy.filterRowCandidates(combinedNovels, { it.genres })\n            if (filteredNovels.isNotEmpty()) {\n                return filteredNovels\n            }\n        } else {\n            if (fromTrending.isNotEmpty()) {\n                return fromTrending\n            }\n\n            // Фолбэк при недоступности трендов:\n            // Запрашиваем «Свежее» (latest updates) из активного/установленного источника пользователя!\n            if (preferredSourceId > 0) {\n                val fallbackSource = runCatchingUnlessCancelled {\n                    catalog.latest(\n                        context.mediaType,\n                        preferredSourceId,\n                        page = context.pageOffset,\n                        releaseStatuses = context.releaseStatuses,\n                    )\n                }.getOrNull().orEmpty().map { item ->\n                    item.copy(\n                        reason = "source",\n                        score = 0.0,\n                    )\n                }.let { items -> policy.filterRowCandidates(items, { it.genres }) }\n                if (fallbackSource.isNotEmpty()) {\n                    return fallbackSource\n                }\n            }\n        }\n\n        return emptyList()\n    }\n}\n\n/**\n * Ряд «Твой вкус»: жанровый профиль библиотеки/истории → тренды по жанрам\n * + жанровый фильтр каталога выбранного источника; скор = совпадение жанров.\n */\nclass DiscoveryTasteRowBuilder(\n    private val trending: DiscoveryTrendingSource,\n    private val catalog: DiscoverySourceCatalog,\n    private val sortProvider: () -> TrendSort,\n    // «Только плагины»: false — внешние жанровые провайдеры не опрашиваются,\n    // ряд строится исключительно из каталога primary-источника.\n    private val includeExternal: Boolean = true,\n) : DiscoveryRowBuilder {\n\n    override val rowType = DiscoveryRowType.TASTE\n\n    override var isDegraded: Boolean = false\n        private set\n\n    override suspend fun build(context: DiscoveryBuildContext): List<DiscoveryRowItem> {\n        isDegraded = false\n        val policy = context.candidatePolicy\n        val activeProfile = resolveDiscoveryTasteProfile(context.tasteProfile, policy)\n        if (activeProfile.isEmpty()) return emptyList()\n        val required = policy.requiredGenres.isNotEmpty()\n\n        // A required query must not be narrowed by unrelated priority/library genres.\n        val genreNames = if (policy.requiredGenres.isNotEmpty()) {\n            policy.requiredGenres.toList()\n        } else {\n            (policy.priorityGenres + activeProfile.map { it.first })\n                .filterNot { policy.isForbidden(listOf(it)) }.distinct().take(6)\n        }\n        val sourceGenreNames = genreNames\n        val trendingResult = if (includeExternal) {\n            runCatchingUnlessCancelled {\n                trending.fetchByGenres(\n                    context.mediaType,\n                    genreNames,\n                    sortProvider(),\n                    page = context.pageOffset,\n                    releaseStatuses = context.releaseStatuses,\n                )\n            }\n        } else {\n            null\n        }\n\n        var trendingItems = trendingResult?.getOrNull().orEmpty()\n        var filteredTrending = policy.filterRowCandidates(trendingItems, { it.genres })\n        // Rich provider, rich row: a strict required query keeps paging while the\n        // provider still exposes new matches. Fetching only page 2, and only when\n        // page 1 was fully rejected, was what turned a rich genre into slow 9→12\n        // accumulation across refreshes.\n        if (includeExternal && required && trendingResult?.isSuccess == true) {\n            var fetchedPages = 1\n            while (\n                filteredTrending.size < RICH_SOURCE_TARGET &&\n                fetchedPages < MAX_REQUIRED_EXTERNAL_PAGES\n            ) {\n                val nextResult = runCatchingUnlessCancelled {\n                    trending.fetchByGenres(\n                        context.mediaType,\n                        genreNames,\n                        sortProvider(),\n                        page = context.pageOffset + fetchedPages,\n                        releaseStatuses = context.releaseStatuses,\n                    )\n                }\n                val nextItems = nextResult.getOrNull().orEmpty()\n                if (nextItems.isEmpty()) break\n                val before = trendingItems.size\n                trendingItems = (trendingItems + nextItems).distinctBy { it.cleanTitle }\n                if (trendingItems.size == before) break\n                filteredTrending = policy.filterRowCandidates(trendingItems, { it.genres })\n                fetchedPages++\n            }\n        }\n\n        val sourceIds = context.sourceIds.filter { it > 0 }\n            .ifEmpty { listOf(context.sourceId).filter { it > 0 } }\n        val shared = context.sharedGenreQuery\n        val sourceResults = if (sourceIds.isNotEmpty()) {\n            if (required && shared != null) {\n                // SOURCE shares the same catalogue pass; TASTE takes the even\n                // slice and SOURCE the odd one, so neither row starves the other.\n                shared.results().map { it.sliceForRow(parity = 0) }\n            } else {\n                val rotation = (context.pageOffset - 1).coerceAtLeast(0) % sourceIds.size\n                val ordered = sourceIds.drop(rotation) + sourceIds.take(rotation)\n                // Required mode pays for verification; the ordinary taste path keeps\n                // its previous cheap shape (six sources, no details hydration).\n                val toQuery = if (required) ordered else ordered.take(6)\n                queryDiscoveryGenreSources(\n                    catalog = catalog,\n                    media = context.mediaType,\n                    sourceIds = toQuery,\n                    genres = sourceGenreNames,\n                    page = context.pageOffset,\n                    releaseStatuses = context.releaseStatuses,\n                    policy = policy,\n                    timeoutMs = if (required) {\n                        genreSourceTimeoutMs(context.verificationBudget, toQuery.size, maxConcurrency = 4)\n                    } else {\n                        SOURCE_FETCH_TIMEOUT_MS\n                    },\n                    hydrate = required,\n                    targetItems = 50,\n                    budget = context.verificationBudget,\n                )\n            }\n        } else {\n            emptyList()\n        }\n        // In the cheap path cards without genres were never going to be hydrated,\n        // so an "unattempted" count there is by design and not a degraded row.\n        isDegraded = sourceResults.any {\n            it.failure != null || (required && it.summary.outcome == GenreVerificationOutcome.INCOMPLETE)\n        }\n        val fromTrending = filteredTrending.map { item ->\n            DiscoveryRowItem(\n                title = item.title,\n                cleanTitle = item.cleanTitle,\n                altCleanTitles = listOfNotNull(\n                    item.altTitle?.let {\n                        normalizeDiscoveryTitle(it)\n                    },\n                ).filter { it.isNotBlank() },\n                coverUrl = item.coverUrl,\n                reason = matchedGenres(item.genres, activeProfile).ifEmpty { genreNames.take(2) }.joinToString(", "),\n                seedTitle = null,\n                provider = item.provider,\n                // Базовый скор совпадения жанров; приоритетные жанры бустятся единым within-row ranker'ом в policy.\n                score = tasteScore(item.genres, activeProfile),\n                genres = item.genres,\n            )\n        }\n        val sourceParts = sourceResults.map { res ->\n            res.summary.items.map { item ->\n                item.copy(\n                    reason = genreNames.take(2).joinToString(", "),\n                    score = 0.5 + item.score * 0.1,\n                )\n            }\n        }\n        val fromSource = if (sourceParts.size > 1) {\n            interleaveSourceParts(sourceParts, cap = 50).distinctBy { it.cleanTitle }\n        } else {\n            sourceParts.flatten()\n        }.let { items -> policy.filterRowCandidates(items, { it.genres }) }\n        val combined = if (fromTrending.isEmpty()) fromSource else mergeNormalized(fromTrending, fromSource)\n        val filteredCombined = policy.filterRowCandidates(\n            combined,\n            { it.genres },\n        )\n        // A verified empty source set is a useful result, not a failure. Fail the\n        // row only when nothing useful could be verified at all.\n        val sourcesFailed = sourceResults.isNotEmpty() &&\n            sourceResults.all { it.summary.outcome == GenreVerificationOutcome.FAILED }\n        val anyFailed = if (sourceResults.isEmpty()) {\n            trendingResult?.isFailure ?: false\n        } else {\n            sourcesFailed\n        }\n        if (filteredCombined.isEmpty() && anyFailed) {\n            throw IOException("taste sources failed without results")\n        }\n        val fresh = filterGenreClustering(filteredCombined, maxPerGenre = 6).take(50)\n        return mergeExistingRowItems(\n            existing = context.existingRowItems[DiscoveryRowType.TASTE].orEmpty(),\n            fresh = fresh,\n            policy = policy,\n            cap = 50,\n        )\n    }\n}\n\n/**\n * Ряд «Источник» (C1): микс ⅘ Latest + ⅕ Popular топ-N источников по весу\n * библиотеки (число тайтлов пользователя), round-robin интерлив; на ручном\n * рефреше порядок источников ротируется, а latest шагается страницей.\n * Единственный источник остаётся в силе — квота растягивается на весь ряд;\n * при скудном latest квота добирается popular'ом.\n */\nclass DiscoverySourceRowBuilder(\n    private val catalog: DiscoverySourceCatalog,\n    private val rowCap: Int = 20,\n    private val sourceTimeoutMs: Long = SOURCE_FETCH_TIMEOUT_MS,\n    private val maxConcurrency: Int = 4,\n) : DiscoveryRowBuilder {\n\n    override val rowType = DiscoveryRowType.SOURCE\n    override var isDegraded: Boolean = false\n        private set\n\n    override suspend fun build(context: DiscoveryBuildContext): List<DiscoveryRowItem> {\n        isDegraded = false\n        val ids = context.sourceIds.filter { it > 0 }\n            .ifEmpty { listOf(context.sourceId).filter { it > 0 } }\n        if (ids.isEmpty()) return emptyList()\n        val rotation = (context.pageOffset - 1).coerceAtLeast(0) % ids.size\n        val ordered = ids.drop(rotation) + ids.take(rotation)\n        val policy = context.candidatePolicy\n        if (policy.requiredGenres.isNotEmpty()) {\n            val shared = context.sharedGenreQuery\n            val results = if (shared != null) {\n                // TASTE ran the same required query; take its odd slice instead\n                // of paying for a second catalogue pass only to be deduped away.\n                shared.results().map { it.sliceForRow(parity = 1) }\n            } else {\n                queryDiscoveryGenreSources(\n                    catalog = catalog,\n                    media = context.mediaType,\n                    sourceIds = ordered,\n                    genres = policy.requiredGenres.toList(),\n                    page = context.pageOffset,\n                    releaseStatuses = context.releaseStatuses,\n                    policy = policy,\n                    maxConcurrency = maxConcurrency,\n                    timeoutMs = genreSourceTimeoutMs(context.verificationBudget, ordered.size, maxConcurrency),\n                    hydrate = true,\n                    targetItems = rowCap,\n                    budget = context.verificationBudget,\n                )\n            }\n            isDegraded = results.any {\n                it.failure != null || it.summary.outcome == GenreVerificationOutcome.INCOMPLETE\n            }\n            val merged = interleaveSourceParts(results.map { it.summary.items }, rowCap)\n                .distinctBy { it.cleanTitle }\n            val usefulVerification = results.any { it.summary.outcome != GenreVerificationOutcome.FAILED }\n            if (merged.isEmpty() && results.isNotEmpty() && !usefulVerification) {\n                throw IOException("required genre sources could not verify any metadata")\n            }\n            return mergeExistingRowItems(\n                existing = context.existingRowItems[DiscoveryRowType.SOURCE].orEmpty(),\n                fresh = policy.filterRowCandidates(merged, { it.genres }).take(rowCap),\n                policy = policy,\n                cap = rowCap,\n                sourceIds = ordered.toSet(),\n            )\n        }\n        val slotAllocations = allocateSourceSlots(ordered, context.sourceWeights, rowCap)\n        val activeSources = ordered.filter { (slotAllocations[it] ?: 0) > 0 }\n        if (activeSources.isEmpty()) return emptyList()\n\n        val semaphore = Semaphore(maxConcurrency)\n        val results = supervisorScope {\n            ordered.map { id ->\n                async {\n                    val perSource = slotAllocations[id] ?: 0\n                    if (perSource <= 0) {\n                        return@async Triple(emptyList<DiscoveryRowItem>(), emptyList<DiscoveryRowItem>(), false)\n                    }\n                    semaphore.withPermit {\n                        val latestQuota = perSource - perSource / 5\n                        val latestDeferred = async {\n                            runCatchingUnlessCancelled {\n                                withTimeoutOrNull(sourceTimeoutMs) {\n                                    catalog.latest(\n                                        context.mediaType,\n                                        id,\n                                        page = context.pageOffset,\n                                        releaseStatuses = context.releaseStatuses,\n                                    )\n                                }\n                            }\n                        }\n                        val popularDeferred = async {\n                            runCatchingUnlessCancelled {\n                                withTimeoutOrNull(sourceTimeoutMs) {\n                                    catalog.popular(\n                                        context.mediaType,\n                                        id,\n                                        page = context.pageOffset,\n                                        releaseStatuses = context.releaseStatuses,\n                                    )\n                                }\n                            }\n                        }\n\n                        val latestResult = latestDeferred.await()\n                        val popularResult = popularDeferred.await()\n\n                        val latestFetched = latestResult.getOrNull().orEmpty()\n                        val latestItems = latestFetched.take(latestQuota)\n                        val latestTitles = latestItems.mapTo(HashSet()) { it.cleanTitle }\n\n                        val popularFetched = popularResult.getOrNull().orEmpty()\n                        val popularItems = popularFetched\n                            .filterNot { it.cleanTitle in latestTitles }\n                            .take(perSource - latestItems.size)\n\n                        val popularFailed = popularResult.isFailure || popularResult.getOrNull() == null\n                        val isFailed = popularFailed && latestItems.isEmpty()\n\n                        val selected = latestItems + popularItems\n\n                        val selectedTitles = selected.mapTo(HashSet()) { it.cleanTitle }\n                        val surplus = (latestFetched + popularFetched)\n                            .filterNot { it.cleanTitle in selectedTitles }\n                            .distinctBy { it.cleanTitle }\n                            .take(rowCap)\n\n                        Triple(selected, surplus, isFailed)\n                    }\n                }\n            }.awaitAll()\n        }\n\n        val failures = results.count { it.third }\n        if (failures == activeSources.size) {\n            throw IOException("all source catalog fetches failed")\n        }\n\n        val parts = results.map { it.first }\n        val surplusParts = results.map { it.second }\n\n        val selected = interleaveSourceParts(parts, rowCap).distinctBy { it.cleanTitle }\n        val filteredSelected = context.candidatePolicy.filterRowCandidates(selected, { it.genres })\n        if (filteredSelected.size >= rowCap) return filteredSelected\n        val selectedTitles = filteredSelected.mapTo(HashSet()) { it.cleanTitle }\n        val backfill = interleaveSourceParts(\n            surplusParts.map { items -> items.filterNot { it.cleanTitle in selectedTitles } },\n            rowCap,\n        ).distinctBy { it.cleanTitle }\n        val filteredBackfill = context.candidatePolicy.filterRowCandidates(backfill, { it.genres })\n        val fresh = (filteredSelected + filteredBackfill).take(rowCap)\n        return mergeExistingRowItems(\n            existing = context.existingRowItems[DiscoveryRowType.SOURCE].orEmpty(),\n            fresh = fresh,\n            policy = context.candidatePolicy,\n            cap = rowCap,\n            sourceIds = ordered.toSet(),\n        )\n    }\n}\n\n/**\n * Keeps compatible persisted cards in front of a thin refresh and appends only\n * genuinely new cards. Duplicate titles are dropped, and the result respects\n * the same cap as a fully fresh row.\n */\ninternal fun mergeExistingRowItems(\n    existing: List<DiscoveryRowItem>,\n    fresh: List<DiscoveryRowItem>,\n    policy: DiscoveryCandidatePolicy,\n    cap: Int,\n    sourceIds: Set<Long>? = null,\n): List<DiscoveryRowItem> {\n    if (cap <= 0) return emptyList()\n    val compatibleExisting = if (existing.isEmpty()) {\n        emptyList()\n    } else {\n        val eligible = if (sourceIds == null) {\n            existing\n        } else {\n            existing.filter { it.sourceId == null || it.sourceId in sourceIds }\n        }\n        policy.filterRowCandidates(eligible, { it.genres })\n    }\n    val seen = HashSet<String>()\n    val merged = ArrayList<DiscoveryRowItem>(cap)\n    for (item in compatibleExisting + fresh) {\n        val keys = listOf(item.cleanTitle) + item.altCleanTitles\n        if (keys.any { it in seen }) continue\n        seen += keys\n        merged += item\n        if (merged.size >= cap) break\n    }\n    return merged\n}\n\n/** Round-robin по частям (источникам): топ каждого источника виден сразу. */\ninternal fun interleaveSourceParts(\n    parts: List<List<DiscoveryRowItem>>,\n    cap: Int = 50,\n): List<DiscoveryRowItem> {\n    val queues = parts.filter { it.isNotEmpty() }.map { ArrayDeque(it) }\n    val out = mutableListOf<DiscoveryRowItem>()\n    var progressed = true\n    while (out.size < cap && progressed) {\n        progressed = false\n        for (queue in queues) {\n            if (out.size >= cap) break\n            if (queue.isNotEmpty()) {\n                out += queue.removeFirst()\n                progressed = true\n            }\n        }\n    }\n    return out\n}\n
+package eu.kanade.tachiyomi.data.discovery
+
+import eu.kanade.tachiyomi.data.suggestions.SuggestionCoordinator
+import eu.kanade.tachiyomi.data.suggestions.SuggestionSeed
+import eu.kanade.tachiyomi.data.suggestions.SuggestionTitleResolver
+import eu.kanade.tachiyomi.data.suggestions.sources.SuggestionMediaType
+import eu.kanade.tachiyomi.data.suggestions.util.bestMatchScoreFor
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
+import tachiyomi.core.common.util.system.logcat
+import tachiyomi.domain.discovery.model.DiscoveryMediaType
+import tachiyomi.domain.discovery.model.DiscoveryRowType
+import tachiyomi.domain.discovery.model.normalizeDiscoveryTitle
+import java.io.IOException
+
+internal const val SOURCE_FETCH_TIMEOUT_MS = 6_000L
+
+/** A provider with plenty of matching titles should fill a required row in one pass. */
+private const val MAX_REQUIRED_EXTERNAL_PAGES = 3
+
+/** Кандидаты LIKE-сида: resolver дополняет сырой тайтл оригиналом из описания и нормализованными вариантами. */
+internal fun likeSeedCandidateTitles(seed: DiscoverySeedInput): List<String> =
+    (SuggestionTitleResolver.resolveCandidates(seed.title, seed.description) + seed.altTitles)
+        .filter { it.isNotBlank() }
+        .distinct()
+
+/**
+ * Ряд «Похоже на X»: переиспользует существующий [SuggestionCoordinator]
+ * (AniList / MAL-Jikan / MangaUpdates / NovelUpdates) на каждый выбранный сид.
+ */
+class DiscoveryLikeRowBuilder(
+    private val suggestionCoordinator: SuggestionCoordinator,
+    private val catalog: DiscoverySourceCatalog? = null,
+    private val includeExternal: Boolean = true,
+) : DiscoveryRowBuilder {
+
+    override val rowType = DiscoveryRowType.LIKE
+    override var isDegraded: Boolean = false
+        private set
+
+    override suspend fun build(context: DiscoveryBuildContext): List<DiscoveryRowItem> {
+        val mediaType = when (context.mediaType) {
+            DiscoveryMediaType.ANIME -> SuggestionMediaType.ANIME
+            DiscoveryMediaType.MANGA -> SuggestionMediaType.MANGA
+            DiscoveryMediaType.NOVEL -> SuggestionMediaType.NOVEL
+        }
+        if (includeExternal) {
+            var fullyFailedSeeds = 0
+            var hasFailedSources = false
+            val feedbackPerSeed = context.feedbackSeeds.map { feedbackSeed ->
+                val suggestionSeed = SuggestionSeed(
+                    mediaType = mediaType,
+                    primaryTitle = feedbackSeed.title,
+                    candidateTitles = SuggestionTitleResolver.resolveCandidates(feedbackSeed.title, null),
+                    description = null,
+                    author = null,
+                    genres = feedbackSeed.genres.ifEmpty { null },
+                )
+                val result = suggestionCoordinator.fetchSuggestions(
+                    suggestionSeed,
+                    limit = 25,
+                    releaseStatuses = context.releaseStatuses,
+                )
+                if (result.failedSources > 0) {
+                    hasFailedSources = true
+                }
+                if (result.items.isEmpty() && result.attemptedSources > 0 &&
+                    result.failedSources == result.attemptedSources
+                ) {
+                    fullyFailedSeeds++
+                }
+                result.items.map { item ->
+                    DiscoveryRowItem(
+                        title = item.title,
+                        cleanTitle = normalizeDiscoveryTitle(item.title),
+                        coverUrl = item.thumbnailUrl,
+                        reason = null,
+                        seedTitle = feedbackSeed.title,
+                        provider = item.providerName,
+                        score = item.bestMatchScoreFor(suggestionSeed).toDouble(),
+                        genres = item.genres,
+                    )
+                }
+            }
+            val libraryPerSeed = context.seeds.map { seed ->
+                val suggestionSeed = SuggestionSeed(
+                    mediaType = mediaType,
+                    primaryTitle = seed.title,
+                    candidateTitles = likeSeedCandidateTitles(seed),
+                    description = seed.description,
+                    author = seed.author,
+                    genres = seed.genres.ifEmpty { null },
+                )
+                val result = suggestionCoordinator.fetchSuggestions(
+                    suggestionSeed,
+                    limit = 25,
+                    releaseStatuses = context.releaseStatuses,
+                )
+                if (result.failedSources > 0) {
+                    hasFailedSources = true
+                }
+                if (result.items.isEmpty() && result.attemptedSources > 0 &&
+                    result.failedSources == result.attemptedSources
+                ) {
+                    fullyFailedSeeds++
+                }
+                result.items.map { item ->
+                    DiscoveryRowItem(
+                        title = item.title,
+                        cleanTitle = normalizeDiscoveryTitle(item.title),
+                        coverUrl = item.thumbnailUrl,
+                        // Локализованный текст «Похоже на „X“» композится на рендере из seedTitle.
+                        reason = null,
+                        seedTitle = seed.title,
+                        provider = item.providerName,
+                        score = item.bestMatchScoreFor(suggestionSeed).toDouble(),
+                        genres = item.genres,
+                    )
+                }
+            }
+            val perSeed = feedbackPerSeed + libraryPerSeed
+            val merged = mergeSeedResults(perSeed)
+            val totalSeeds = context.seeds.size + context.feedbackSeeds.size
+            if (hasFailedSources && merged.isNotEmpty()) {
+                isDegraded = true
+            }
+            if (merged.isEmpty() && totalSeeds > 0 && (fullyFailedSeeds == totalSeeds || hasFailedSources)) {
+                throw IOException("all suggestion providers failed for every seed")
+            }
+            return context.candidatePolicy.filterRowCandidates(merged, { it.genres })
+        } else {
+            if (catalog == null) return emptyList()
+            val sourceIds = context.sourceIds.filter { it > 0 }
+                .ifEmpty { listOf(context.sourceId).filter { it > 0 } }
+            if (sourceIds.isEmpty()) return emptyList()
+
+            val allSeeds = (
+                context.feedbackSeeds.map { it.title to it.genres } +
+                    context.seeds.map { it.title to it.genres }
+                ).filter { it.second.isNotEmpty() }
+            if (allSeeds.isEmpty()) return emptyList()
+
+            val perSeed = supervisorScope {
+                allSeeds.mapIndexed { seedIndex, (seedTitle, genres) ->
+                    async {
+                        val seedSources = if (sourceIds.size <= 2) {
+                            sourceIds
+                        } else {
+                            val start = (seedIndex * 2) % sourceIds.size
+                            listOf(sourceIds[start], sourceIds[(start + 1) % sourceIds.size])
+                        }
+                        seedSources.map { sourceId ->
+                            async {
+                                runCatchingUnlessCancelled {
+                                    withTimeoutOrNull(SOURCE_FETCH_TIMEOUT_MS) {
+                                        catalog.popularWithGenres(
+                                            context.mediaType,
+                                            sourceId,
+                                            genres = genres.take(3),
+                                            page = 1,
+                                            releaseStatuses = context.releaseStatuses,
+                                        )
+                                    }
+                                }.getOrNull().orEmpty()
+                            }
+                        }.awaitAll().flatten().map { item ->
+                            item.copy(
+                                seedTitle = seedTitle,
+                                reason = null,
+                            )
+                        }
+                    }
+                }.awaitAll()
+            }
+            val merged = mergeSeedResults(perSeed)
+            return context.candidatePolicy.filterRowCandidates(merged, { it.genres })
+        }
+    }
+}
+
+/**
+ * Ряд «Тренды и сезон»: агрегатор трендов (Shikimori, MangaDex, Jikan, AniList)
+ * и свежие обновления установленных источников.
+ */
+class DiscoveryTrendRowBuilder(
+    private val trending: DiscoveryTrendingSource,
+    private val catalog: DiscoverySourceCatalog,
+    private val seasonProvider: () -> TrendSeason,
+    private val sortProvider: () -> TrendSort,
+) : DiscoveryRowBuilder {
+
+    override val rowType = DiscoveryRowType.TREND
+
+    override suspend fun build(context: DiscoveryBuildContext): List<DiscoveryRowItem> {
+        val effectiveSort = when (context.mediaType) {
+            DiscoveryMediaType.ANIME -> sortProvider()
+            // Для манги и новелл запрашиваем реальные тренды (TRENDING_DESC),
+            // чтобы не дублировать статический all-time топ ряда TASTE
+            DiscoveryMediaType.MANGA, DiscoveryMediaType.NOVEL -> TrendSort.TRENDING
+        }
+        // C1: приоритет — топ-взвешенный источник библиотеки, иначе lastUsed/fallback.
+        val preferredSourceId = context.sourceIds.firstOrNull() ?: context.sourceId
+        val policy = context.candidatePolicy
+
+        val fromSource = if (context.mediaType == DiscoveryMediaType.NOVEL && preferredSourceId > 0) {
+            runCatchingUnlessCancelled {
+                catalog.latest(
+                    context.mediaType,
+                    preferredSourceId,
+                    page = context.pageOffset,
+                    releaseStatuses = context.releaseStatuses,
+                )
+            }.getOrNull().orEmpty().map { item ->
+                item.copy(
+                    reason = "source",
+                    score = 0.0,
+                )
+            }.let { items -> policy.filterRowCandidates(items, { it.genres }) }
+        } else {
+            emptyList()
+        }
+
+        val fromTrending = runCatchingUnlessCancelled {
+            trending.fetch(
+                mediaType = context.mediaType,
+                season = seasonProvider(),
+                sort = effectiveSort,
+                page = context.pageOffset,
+                releaseStatuses = context.releaseStatuses,
+            )
+        }.getOrNull().orEmpty()
+            .let { items -> policy.filterRowCandidates(items, { it.genres }) }
+            .map { item ->
+                DiscoveryRowItem(
+                    title = item.title,
+                    cleanTitle = item.cleanTitle,
+                    altCleanTitles = listOfNotNull(
+                        item.altTitle?.let {
+                            normalizeDiscoveryTitle(it)
+                        },
+                    ).filter { it.isNotBlank() },
+                    coverUrl = item.coverUrl,
+                    // Payload "current"/"next"/"source"/null — шаблон строки выбирается на рендере.
+                    reason = item.seasonLabel,
+                    seedTitle = null,
+                    provider = item.provider,
+                    rating = item.rating,
+                    episodes = item.episodes,
+                    status = item.releaseStatus,
+                    score = 0.0,
+                    genres = item.genres,
+                )
+            }
+
+        if (context.releaseStatuses.isNotEmpty()) {
+            logcat {
+                "[Discovery] trend row media=${context.mediaType} trending=${fromTrending.size} " +
+                    "sourceLatest=${fromSource.size} statuses=${context.releaseStatuses}"
+            }
+        }
+
+        // Приоритетные жанры ранжируются единым within-row ranker'ом в policy.filterRowCandidates.
+
+        if (context.mediaType == DiscoveryMediaType.NOVEL) {
+            val combinedNovels = (fromSource + fromTrending).distinctBy { it.cleanTitle }
+            val filteredNovels = policy.filterRowCandidates(combinedNovels, { it.genres })
+            if (filteredNovels.isNotEmpty()) {
+                return filteredNovels
+            }
+        } else {
+            if (fromTrending.isNotEmpty()) {
+                return fromTrending
+            }
+
+            // Фолбэк при недоступности трендов:
+            // Запрашиваем «Свежее» (latest updates) из активного/установленного источника пользователя!
+            if (preferredSourceId > 0) {
+                val fallbackSource = runCatchingUnlessCancelled {
+                    catalog.latest(
+                        context.mediaType,
+                        preferredSourceId,
+                        page = context.pageOffset,
+                        releaseStatuses = context.releaseStatuses,
+                    )
+                }.getOrNull().orEmpty().map { item ->
+                    item.copy(
+                        reason = "source",
+                        score = 0.0,
+                    )
+                }.let { items -> policy.filterRowCandidates(items, { it.genres }) }
+                if (fallbackSource.isNotEmpty()) {
+                    return fallbackSource
+                }
+            }
+        }
+
+        return emptyList()
+    }
+}
+
+/**
+ * Ряд «Твой вкус»: жанровый профиль библиотеки/истории → тренды по жанрам
+ * + жанровый фильтр каталога выбранного источника; скор = совпадение жанров.
+ */
+class DiscoveryTasteRowBuilder(
+    private val trending: DiscoveryTrendingSource,
+    private val catalog: DiscoverySourceCatalog,
+    private val sortProvider: () -> TrendSort,
+    // «Только плагины»: false — внешние жанровые провайдеры не опрашиваются,
+    // ряд строится исключительно из каталога primary-источника.
+    private val includeExternal: Boolean = true,
+) : DiscoveryRowBuilder {
+
+    override val rowType = DiscoveryRowType.TASTE
+
+    override var isDegraded: Boolean = false
+        private set
+
+    override suspend fun build(context: DiscoveryBuildContext): List<DiscoveryRowItem> {
+        isDegraded = false
+        val policy = context.candidatePolicy
+        val activeProfile = resolveDiscoveryTasteProfile(context.tasteProfile, policy)
+        if (activeProfile.isEmpty()) return emptyList()
+        val required = policy.requiredGenres.isNotEmpty()
+
+        // A required query must not be narrowed by unrelated priority/library genres.
+        val genreNames = if (policy.requiredGenres.isNotEmpty()) {
+            policy.requiredGenres.toList()
+        } else {
+            (policy.priorityGenres + activeProfile.map { it.first })
+                .filterNot { policy.isForbidden(listOf(it)) }.distinct().take(6)
+        }
+        val sourceGenreNames = genreNames
+        val trendingResult = if (includeExternal) {
+            runCatchingUnlessCancelled {
+                trending.fetchByGenres(
+                    context.mediaType,
+                    genreNames,
+                    sortProvider(),
+                    page = context.pageOffset,
+                    releaseStatuses = context.releaseStatuses,
+                )
+            }
+        } else {
+            null
+        }
+
+        var trendingItems = trendingResult?.getOrNull().orEmpty()
+        var filteredTrending = policy.filterRowCandidates(trendingItems, { it.genres })
+        // Rich provider, rich row: a strict required query keeps paging while the
+        // provider still exposes new matches. Fetching only page 2, and only when
+        // page 1 was fully rejected, was what turned a rich genre into slow 9→12
+        // accumulation across refreshes.
+        if (includeExternal && required && trendingResult?.isSuccess == true) {
+            var fetchedPages = 1
+            while (
+                filteredTrending.size < RICH_SOURCE_TARGET &&
+                fetchedPages < MAX_REQUIRED_EXTERNAL_PAGES
+            ) {
+                val nextResult = runCatchingUnlessCancelled {
+                    trending.fetchByGenres(
+                        context.mediaType,
+                        genreNames,
+                        sortProvider(),
+                        page = context.pageOffset + fetchedPages,
+                        releaseStatuses = context.releaseStatuses,
+                    )
+                }
+                val nextItems = nextResult.getOrNull().orEmpty()
+                if (nextItems.isEmpty()) break
+                val before = trendingItems.size
+                trendingItems = (trendingItems + nextItems).distinctBy { it.cleanTitle }
+                if (trendingItems.size == before) break
+                filteredTrending = policy.filterRowCandidates(trendingItems, { it.genres })
+                fetchedPages++
+            }
+        }
+
+        val sourceIds = context.sourceIds.filter { it > 0 }
+            .ifEmpty { listOf(context.sourceId).filter { it > 0 } }
+        val shared = context.sharedGenreQuery
+        val sourceResults = if (sourceIds.isNotEmpty()) {
+            if (required && shared != null) {
+                // SOURCE shares the same catalogue pass; TASTE takes the even
+                // slice and SOURCE the odd one, so neither row starves the other.
+                shared.results().map { it.sliceForRow(parity = 0) }
+            } else {
+                val rotation = (context.pageOffset - 1).coerceAtLeast(0) % sourceIds.size
+                val ordered = sourceIds.drop(rotation) + sourceIds.take(rotation)
+                // Required mode pays for verification; the ordinary taste path keeps
+                // its previous cheap shape (six sources, no details hydration).
+                val toQuery = if (required) ordered else ordered.take(6)
+                queryDiscoveryGenreSources(
+                    catalog = catalog,
+                    media = context.mediaType,
+                    sourceIds = toQuery,
+                    genres = sourceGenreNames,
+                    page = context.pageOffset,
+                    releaseStatuses = context.releaseStatuses,
+                    policy = policy,
+                    timeoutMs = if (required) {
+                        genreSourceTimeoutMs(context.verificationBudget, toQuery.size, maxConcurrency = 4)
+                    } else {
+                        SOURCE_FETCH_TIMEOUT_MS
+                    },
+                    hydrate = required,
+                    targetItems = 50,
+                    budget = context.verificationBudget,
+                )
+            }
+        } else {
+            emptyList()
+        }
+        // In the cheap path cards without genres were never going to be hydrated,
+        // so an "unattempted" count there is by design and not a degraded row.
+        isDegraded = sourceResults.any {
+            it.failure != null || (required && it.summary.outcome == GenreVerificationOutcome.INCOMPLETE)
+        }
+        val fromTrending = filteredTrending.map { item ->
+            DiscoveryRowItem(
+                title = item.title,
+                cleanTitle = item.cleanTitle,
+                altCleanTitles = listOfNotNull(
+                    item.altTitle?.let {
+                        normalizeDiscoveryTitle(it)
+                    },
+                ).filter { it.isNotBlank() },
+                coverUrl = item.coverUrl,
+                reason = matchedGenres(item.genres, activeProfile).ifEmpty { genreNames.take(2) }.joinToString(", "),
+                seedTitle = null,
+                provider = item.provider,
+                rating = item.rating,
+                episodes = item.episodes,
+                status = item.releaseStatus,
+                // Базовый скор совпадения жанров; приоритетные жанры бустятся единым within-row ranker'ом в policy.
+                score = tasteScore(item.genres, activeProfile),
+                genres = item.genres,
+            )
+        }
+        val sourceParts = sourceResults.map { res ->
+            res.summary.items.map { item ->
+                item.copy(
+                    reason = genreNames.take(2).joinToString(", "),
+                    score = 0.5 + item.score * 0.1,
+                )
+            }
+        }
+        val fromSource = if (sourceParts.size > 1) {
+            interleaveSourceParts(sourceParts, cap = 50).distinctBy { it.cleanTitle }
+        } else {
+            sourceParts.flatten()
+        }.let { items -> policy.filterRowCandidates(items, { it.genres }) }
+        val combined = if (fromTrending.isEmpty()) fromSource else mergeNormalized(fromTrending, fromSource)
+        val filteredCombined = policy.filterRowCandidates(
+            combined,
+            { it.genres },
+        )
+        // A verified empty source set is a useful result, not a failure. Fail the
+        // row only when nothing useful could be verified at all.
+        val sourcesFailed = sourceResults.isNotEmpty() &&
+            sourceResults.all { it.summary.outcome == GenreVerificationOutcome.FAILED }
+        val anyFailed = if (sourceResults.isEmpty()) {
+            trendingResult?.isFailure ?: false
+        } else {
+            sourcesFailed
+        }
+        if (filteredCombined.isEmpty() && anyFailed) {
+            throw IOException("taste sources failed without results")
+        }
+        val fresh = filterGenreClustering(filteredCombined, maxPerGenre = 6).take(50)
+        return mergeExistingRowItems(
+            existing = context.existingRowItems[DiscoveryRowType.TASTE].orEmpty(),
+            fresh = fresh,
+            policy = policy,
+            cap = 50,
+        )
+    }
+}
+
+/**
+ * Ряд «Источник» (C1): микс ⅘ Latest + ⅕ Popular топ-N источников по весу
+ * библиотеки (число тайтлов пользователя), round-robin интерлив; на ручном
+ * рефреше порядок источников ротируется, а latest шагается страницей.
+ * Единственный источник остаётся в силе — квота растягивается на весь ряд;
+ * при скудном latest квота добирается popular'ом.
+ */
+class DiscoverySourceRowBuilder(
+    private val catalog: DiscoverySourceCatalog,
+    private val rowCap: Int = 20,
+    private val sourceTimeoutMs: Long = SOURCE_FETCH_TIMEOUT_MS,
+    private val maxConcurrency: Int = 4,
+) : DiscoveryRowBuilder {
+
+    override val rowType = DiscoveryRowType.SOURCE
+    override var isDegraded: Boolean = false
+        private set
+
+    override suspend fun build(context: DiscoveryBuildContext): List<DiscoveryRowItem> {
+        isDegraded = false
+        val ids = context.sourceIds.filter { it > 0 }
+            .ifEmpty { listOf(context.sourceId).filter { it > 0 } }
+        if (ids.isEmpty()) return emptyList()
+        val rotation = (context.pageOffset - 1).coerceAtLeast(0) % ids.size
+        val ordered = ids.drop(rotation) + ids.take(rotation)
+        val policy = context.candidatePolicy
+        if (policy.requiredGenres.isNotEmpty()) {
+            val shared = context.sharedGenreQuery
+            val results = if (shared != null) {
+                // TASTE ran the same required query; take its odd slice instead
+                // of paying for a second catalogue pass only to be deduped away.
+                shared.results().map { it.sliceForRow(parity = 1) }
+            } else {
+                queryDiscoveryGenreSources(
+                    catalog = catalog,
+                    media = context.mediaType,
+                    sourceIds = ordered,
+                    genres = policy.requiredGenres.toList(),
+                    page = context.pageOffset,
+                    releaseStatuses = context.releaseStatuses,
+                    policy = policy,
+                    maxConcurrency = maxConcurrency,
+                    timeoutMs = genreSourceTimeoutMs(context.verificationBudget, ordered.size, maxConcurrency),
+                    hydrate = true,
+                    targetItems = rowCap,
+                    budget = context.verificationBudget,
+                )
+            }
+            isDegraded = results.any {
+                it.failure != null || it.summary.outcome == GenreVerificationOutcome.INCOMPLETE
+            }
+            val merged = interleaveSourceParts(results.map { it.summary.items }, rowCap)
+                .distinctBy { it.cleanTitle }
+            val usefulVerification = results.any { it.summary.outcome != GenreVerificationOutcome.FAILED }
+            if (merged.isEmpty() && results.isNotEmpty() && !usefulVerification) {
+                throw IOException("required genre sources could not verify any metadata")
+            }
+            return mergeExistingRowItems(
+                existing = context.existingRowItems[DiscoveryRowType.SOURCE].orEmpty(),
+                fresh = policy.filterRowCandidates(merged, { it.genres }).take(rowCap),
+                policy = policy,
+                cap = rowCap,
+                sourceIds = ordered.toSet(),
+            )
+        }
+        val slotAllocations = allocateSourceSlots(ordered, context.sourceWeights, rowCap)
+        val activeSources = ordered.filter { (slotAllocations[it] ?: 0) > 0 }
+        if (activeSources.isEmpty()) return emptyList()
+
+        val semaphore = Semaphore(maxConcurrency)
+        val results = supervisorScope {
+            ordered.map { id ->
+                async {
+                    val perSource = slotAllocations[id] ?: 0
+                    if (perSource <= 0) {
+                        return@async Triple(emptyList<DiscoveryRowItem>(), emptyList<DiscoveryRowItem>(), false)
+                    }
+                    semaphore.withPermit {
+                        val latestQuota = perSource - perSource / 5
+                        val latestDeferred = async {
+                            runCatchingUnlessCancelled {
+                                withTimeoutOrNull(sourceTimeoutMs) {
+                                    catalog.latest(
+                                        context.mediaType,
+                                        id,
+                                        page = context.pageOffset,
+                                        releaseStatuses = context.releaseStatuses,
+                                    )
+                                }
+                            }
+                        }
+                        val popularDeferred = async {
+                            runCatchingUnlessCancelled {
+                                withTimeoutOrNull(sourceTimeoutMs) {
+                                    catalog.popular(
+                                        context.mediaType,
+                                        id,
+                                        page = context.pageOffset,
+                                        releaseStatuses = context.releaseStatuses,
+                                    )
+                                }
+                            }
+                        }
+
+                        val latestResult = latestDeferred.await()
+                        val popularResult = popularDeferred.await()
+
+                        val latestFetched = latestResult.getOrNull().orEmpty()
+                        val latestItems = latestFetched.take(latestQuota)
+                        val latestTitles = latestItems.mapTo(HashSet()) { it.cleanTitle }
+
+                        val popularFetched = popularResult.getOrNull().orEmpty()
+                        val popularItems = popularFetched
+                            .filterNot { it.cleanTitle in latestTitles }
+                            .take(perSource - latestItems.size)
+
+                        val popularFailed = popularResult.isFailure || popularResult.getOrNull() == null
+                        val isFailed = popularFailed && latestItems.isEmpty()
+
+                        val selected = latestItems + popularItems
+
+                        val selectedTitles = selected.mapTo(HashSet()) { it.cleanTitle }
+                        val surplus = (latestFetched + popularFetched)
+                            .filterNot { it.cleanTitle in selectedTitles }
+                            .distinctBy { it.cleanTitle }
+                            .take(rowCap)
+
+                        Triple(selected, surplus, isFailed)
+                    }
+                }
+            }.awaitAll()
+        }
+
+        val failures = results.count { it.third }
+        if (failures == activeSources.size) {
+            throw IOException("all source catalog fetches failed")
+        }
+
+        val parts = results.map { it.first }
+        val surplusParts = results.map { it.second }
+
+        val selected = interleaveSourceParts(parts, rowCap).distinctBy { it.cleanTitle }
+        val filteredSelected = context.candidatePolicy.filterRowCandidates(selected, { it.genres })
+        if (filteredSelected.size >= rowCap) return filteredSelected
+        val selectedTitles = filteredSelected.mapTo(HashSet()) { it.cleanTitle }
+        val backfill = interleaveSourceParts(
+            surplusParts.map { items -> items.filterNot { it.cleanTitle in selectedTitles } },
+            rowCap,
+        ).distinctBy { it.cleanTitle }
+        val filteredBackfill = context.candidatePolicy.filterRowCandidates(backfill, { it.genres })
+        val fresh = (filteredSelected + filteredBackfill).take(rowCap)
+        return mergeExistingRowItems(
+            existing = context.existingRowItems[DiscoveryRowType.SOURCE].orEmpty(),
+            fresh = fresh,
+            policy = context.candidatePolicy,
+            cap = rowCap,
+            sourceIds = ordered.toSet(),
+        )
+    }
+}
+
+/**
+ * Keeps compatible persisted cards in front of a thin refresh and appends only
+ * genuinely new cards. Duplicate titles are dropped, and the result respects
+ * the same cap as a fully fresh row.
+ */
+internal fun mergeExistingRowItems(
+    existing: List<DiscoveryRowItem>,
+    fresh: List<DiscoveryRowItem>,
+    policy: DiscoveryCandidatePolicy,
+    cap: Int,
+    sourceIds: Set<Long>? = null,
+): List<DiscoveryRowItem> {
+    if (cap <= 0) return emptyList()
+    val compatibleExisting = if (existing.isEmpty()) {
+        emptyList()
+    } else {
+        val eligible = if (sourceIds == null) {
+            existing
+        } else {
+            existing.filter { it.sourceId == null || it.sourceId in sourceIds }
+        }
+        policy.filterRowCandidates(eligible, { it.genres })
+    }
+    val seen = HashSet<String>()
+    val merged = ArrayList<DiscoveryRowItem>(cap)
+    for (item in compatibleExisting + fresh) {
+        val keys = listOf(item.cleanTitle) + item.altCleanTitles
+        if (keys.any { it in seen }) continue
+        seen += keys
+        merged += item
+        if (merged.size >= cap) break
+    }
+    return merged
+}
+
+/** Round-robin по частям (источникам): топ каждого источника виден сразу. */
+internal fun interleaveSourceParts(
+    parts: List<List<DiscoveryRowItem>>,
+    cap: Int = 50,
+): List<DiscoveryRowItem> {
+    val queues = parts.filter { it.isNotEmpty() }.map { ArrayDeque(it) }
+    val out = mutableListOf<DiscoveryRowItem>()
+    var progressed = true
+    while (out.size < cap && progressed) {
+        progressed = false
+        for (queue in queues) {
+            if (out.size >= cap) break
+            if (queue.isNotEmpty()) {
+                out += queue.removeFirst()
+                progressed = true
+            }
+        }
+    }
+    return out
+}
