@@ -943,6 +943,10 @@ private fun HomeHubScreen(
                     }
                 }
 
+                item(key = "home_news", contentType = "home_hub_news") {
+                    HomeNewsSection(section = section)
+                }
+
                 if (
                     shouldShowForYouSection(state.discoveryEnabled) && !keepDiscoveryHeroSlot &&
                     heroPresentation != HomeHeroMode.Collage &&

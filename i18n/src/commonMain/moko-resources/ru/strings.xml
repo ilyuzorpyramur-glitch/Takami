@@ -1854,4 +1854,14 @@
     <string name="reels_album_search_load_more">Загрузить ещё видео</string>
     <string name="reels_session_restore_pending">Подготовка сохранённых видео…</string>
     <string name="reels_session_buffer_full">Буфер сохранения заполнен. Просмотрите или пропустите оставшиеся видео, чтобы продолжить загрузку.</string>
+
+    <!-- Новости -->
+    <string name="news_title">Новости</string>
+    <string name="news_more">Все</string>
+    <string name="news_today">сегодня</string>
+    <string name="news_yesterday">вчера</string>
+    <string name="news_screen_title">Все новости</string>
+    <string name="news_empty">Новостей пока нет</string>
+    <string name="news_retry">Проверить снова</string>
+    <string name="news_refresh">Обновить</string>
 </resources>
