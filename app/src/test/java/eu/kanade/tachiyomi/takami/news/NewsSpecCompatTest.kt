@@ -5,6 +5,7 @@ import eu.kanade.tachiyomi.takami.SiteSpec
 import eu.kanade.tachiyomi.takami.spec.SPEC_VERSION
 import kotlinx.serialization.json.Json
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
