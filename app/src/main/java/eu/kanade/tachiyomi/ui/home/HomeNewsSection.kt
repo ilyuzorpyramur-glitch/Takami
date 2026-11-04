@@ -1,4 +1,4 @@
-package eu.kanade.tachiyomi.ui.news
+package eu.kanade.tachiyomi.ui.home
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,6 +24,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.tachiyomi.takami.news.NewsItem
+import eu.kanade.tachiyomi.ui.news.NewsItemCard
+import eu.kanade.tachiyomi.ui.news.NewsScreen
+import eu.kanade.tachiyomi.ui.news.NewsStateModel
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import tachiyomi.i18n.MR
 import java.util.Date

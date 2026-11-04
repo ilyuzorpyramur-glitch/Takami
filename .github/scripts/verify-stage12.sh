@@ -224,8 +224,9 @@ if [ -f "$HERE/verify-stage11.sh" ]; then
     else
         OTHER=$(grep -cE '^\[[A-Za-z0-9.]+\] FAIL' /tmp/stage11-regression.txt)
         H14=$(grep -cE '^\[H14b\] FAIL' /tmp/stage11-regression.txt)
-        # R2 этапа 11 — чужая цепочка этапа 9: её провал на main не наша регрессия.
-        R2F=$(grep -cE '^\[R2\] FAIL' /tmp/stage11-regression.txt)
+        # R2 этапа 11 — чужая цепочка этапа 9: её провал есть и на main,
+        # правок этапа 9 в этой ветке нет.
+        R2F=$(grep -cE 'FAIL  R2 гейт этапа 9' /tmp/stage11-regression.txt)
         OTHER=$((OTHER - R2F))
         if [ "$OTHER" -le 1 ] && [ "$H14" -ge 1 ]; then
             ok R1 "этап 11: провалы — правка общих файлов и чужая цепочка этапа 9"
