@@ -152,15 +152,19 @@ class Fetcher internal constructor(
         // запрос всё равно
         // дойдёт до конца, ответ ляжет в кэш и не пропадёт впустую.
         scope.launch {
-            try {
+            val result = runCatching {
                 val loaded = fetchWithCache(url, referer, priority, cached)
                 remember(key, loaded, guard.now())
-                slot.complete(loaded)
-            } catch (e: Throwable) {
-                slot.completeExceptionally(e)
-            } finally {
-                inFlight.remove(key, slot)
+                loaded
             }
+            // Снимаем запись раньше, чем будим ожидающих: иначе следующий
+            // вызов успеет присоединиться к уже завершённой загрузке,
+            // получит её ошибку и не спросит предохранитель.
+            inFlight.remove(key, slot)
+            result.fold(
+                onSuccess = { slot.complete(it) },
+                onFailure = { slot.completeExceptionally(it) },
+            )
         }
         return slot.await()
     }
@@ -462,24 +466,25 @@ class Fetcher internal constructor(
     ): Raw {
         currentCoroutineContext().ensureActive()
         val host = hostOf(url)
+        val gate = breaker
         // Домен в паузе: ни одного запроса, даже пробного.
-        if (breaker?.allow(host) == false) throw BreakerOpenError(host)
+        if (gate != null && !gate.allow(host)) throw BreakerOpenError(host)
 
-        val healthBefore = breaker?.state(host)?.state
+        val healthBefore = gate?.state(host)?.state
         // Пробный запрос после паузы: его неудача снова
         // закрывает домен,
         // и повтор внутри той же операции уже не имеет смысла.
-        val probing = breaker?.state(host)?.state == BreakerState.HALF_OPEN
+        val probing = gate?.state(host)?.state == BreakerState.HALF_OPEN
         val first = try {
             sendOnce(url, referer, priority, head, post, headers, host)
         } catch (e: IOException) {
-            breaker?.onFailure(host, e.message)
+            gate?.onFailure(host, e.message)
             noteFailure(url, e)
             noteHealth(host, healthBefore)
-            if (probing && breaker?.allow(host) == false) throw BreakerOpenError(host)
+            if (probing && gate != null && !gate.allow(host)) throw BreakerOpenError(host)
             throw e
         }
-        breaker?.onSuccess(host)
+        gate?.onSuccess(host)
         noteHealth(host, healthBefore)
         if (first.protection.passed) return first
 
@@ -490,10 +495,10 @@ class Fetcher internal constructor(
                 val again = try {
                     sendOnce(url, referer, priority, head, post, headers, host)
                 } catch (e: IOException) {
-                    breaker?.onFailure(host, e.message)
+                    gate?.onFailure(host, e.message)
                     throw e
                 }
-                breaker?.onSuccess(host)
+                gate?.onSuccess(host)
                 if (again.protection.passed) return again
                 refuse(host, again.url, ProtectionLevel.CAPTCHA, again.protection.reason)
             }

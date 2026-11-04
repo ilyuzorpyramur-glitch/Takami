@@ -69,6 +69,25 @@ class CircuitBreakerTest {
     }
 
     @Test
+    fun `ошибка не достаётся следующему вызову`(): Unit = runBlocking {
+        server.dispatcher = alwaysFailing()
+        val url = server.url("/catalog").toString()
+
+        // Раньше запись о загрузке снималась уже после того, как ожидающий
+        // получил ответ: следующий вызов иногда присоединялся к прошлой
+        // загрузке и получал её ошибку вместо проверки предохранителя.
+        repeat(20) {
+            val gate = breaker()
+            val fetcher = fetcher(gate)
+            assertFailsWith<HttpStatusError> { fetcher.get(url) }
+            val afterFirst = server.requestCount
+
+            assertFailsWith<BreakerOpenError> { fetcher.get(url) }
+            server.requestCount shouldBe afterFirst
+        }
+    }
+
+    @Test
     fun `после паузы уходит ровно один пробный запрос`(): Unit = runBlocking {
         server.dispatcher = alwaysFailing()
         val gate = breaker()
