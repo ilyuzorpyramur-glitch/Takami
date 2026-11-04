@@ -481,7 +481,7 @@ class Fetcher internal constructor(
             gate?.onFailure(host, e.message)
             noteFailure(url, e)
             noteHealth(host, healthBefore)
-            if (probing && gate != null && !gate.allow(host)) throw BreakerOpenError(host)
+        if (probing && !gate.allow(host)) throw BreakerOpenError(host)
             throw e
         }
         gate?.onSuccess(host)

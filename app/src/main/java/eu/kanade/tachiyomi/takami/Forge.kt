@@ -506,13 +506,13 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
 
     /** Короткий селектор блока: id целиком, иначе первый класс. */
     private fun blockSelector(element: Element): String? {
-        var node: Element? = element
+        var node: Element = element
         repeat(3) {
-            node = node?.parent() ?: return null
-            val id = node!!.id()
+            node = node.parent() ?: return null
+            val id = node.id()
             if (id.isNotBlank()) return "#" + id + " " + element.tagName()
-            val cls = node!!.className().trim().split(' ').firstOrNull { it.isNotBlank() }
-            if (cls != null) return node!!.tagName() + "." + cls + " " + element.tagName()
+            val cls = node.className().trim().split(' ').firstOrNull { it.isNotBlank() }
+            if (cls != null) return node.tagName() + "." + cls + " " + element.tagName()
         }
         return null
     }
