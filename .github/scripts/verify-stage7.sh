@@ -259,8 +259,10 @@ fi
 echo
 echo "--- стиль ---"
 
-LONG=$(awk 'length > 120 {print FILENAME":"FNR}' "$VIDEO"/*.kt "$TAKAMI/SpecEngine.kt" \
-    "$TAKAMI/SiteSpec.kt" "$UI/TakamiForgeScreen.kt" 2>/dev/null | head -5)
+LONG=$(for f in "$VIDEO"/*.kt "$TAKAMI/SpecEngine.kt" \
+    "$TAKAMI/SiteSpec.kt" "$UI/TakamiForgeScreen.kt"; do
+    [ -f "$f" ] && grep -nE '^.{121,}$' "$f" | sed "s|^|$f:|"
+done 2>/dev/null | head -5)
 if [ -z "$LONG" ]; then
     ok K1 "нет строк длиннее 120 символов"
 else

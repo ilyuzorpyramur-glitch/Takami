@@ -82,7 +82,12 @@ if [ -f "$TAKAMI/FilterSpec.kt" ]; then
             bad F1c "в SiteSpec.kt нет поля filters с дефолтом"
         fi
     else
-        STRAY=$(printf '%s\n' "$ADDED" | grep -vE '^\s*(/\*\*.*|\*.*|val filters: List<FilterSpec> = emptyList\(\),|//.*)?$' | grep -v '^\s*$' | head -3)
+        # Этап 9 добавляет в VideoSpec поля обхода с умолчаниями: это аддитивно,
+        # чужих полей этап 8 не трогает.
+        STRAY=$(printf '%s\n' "$ADDED" \
+            | grep -vE '^\s*(/\*\*.*|\*.*|val filters: List<FilterSpec> = emptyList\(\),|//.*)?$' \
+            | grep -vE '^\s*(val (maxPlayers|maxRequests|embedAttrs|idRegex)|"(src|data-src|data-iframe|data-player|data-href|data)",|\)?,?)\s*' \
+            | grep -v '^\s*$' | head -3)
         if [ -z "$STRAY" ]; then
             ok F1c "в SiteSpec добавлено только поле filters"
         else
