@@ -26,11 +26,9 @@ object NewsParser {
     private const val SNIPPET_CHARS = 180
     private const val SNIPPET_WORDS = 30
 
-    /** Метки дат лент: RFC-822 у RSS, ISO у Atom. */
-    private val RFC_822 = DateTimeFormatterBuilder()
-        .appendPattern("EEE, dd MMM yyyy HH:mm:ss ")
-        .parseDefaulting(ChronoField.OFFSET_SECONDS, 0)
-        .toFormatter(Locale.US)
+    /** Метки дат лент: RFC-822 у RSS (именованная зона и цифры), ISO у Atom. */
+    private val RFC_NAMED = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss z", Locale.US)
+    private val RFC_NUMERIC = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss Z", Locale.US)
     private val ISO_WITH_ZONE = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
     /** Вырезает теги, схлопывает переносы и обрезает по словам, а не по байтам. */
@@ -52,7 +50,10 @@ object NewsParser {
         val text = raw.trim()
         if (text.isEmpty()) return null
         runCatching { return OffsetDateTime.parse(text, ISO_WITH_ZONE).toInstant().toEpochMilli() }
-        runCatching { return OffsetDateTime.parse(text, RFC_822).toInstant().toEpochMilli() }
+        runCatching { return OffsetDateTime.parse(text, RFC_NUMERIC).toInstant().toEpochMilli() }
+        runCatching {
+            return java.time.ZonedDateTime.parse(text, RFC_NAMED).toInstant().toEpochMilli()
+        }
         runCatching { return LocalDate.parse(text.take(10)).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }
         return null
     }
@@ -125,14 +126,15 @@ object NewsParser {
             ?: link.attr("title").takeIf { it.isNotBlank() }
             ?: link.text().trim()
         if (title.isEmpty()) return null
-        val date = spec.dateSelector
-            ?.let { card.selectFirst(it)?.text() }
-            ?.let { parseDate(it) }
+        val dateRaw = spec.dateSelector?.let { card.selectFirst(it)?.text() }
+        var body = card.text()
+        if (body.startsWith(title)) body = body.removePrefix(title)
+        dateRaw?.takeIf { it.isNotBlank() && body.startsWith(it) }?.let { body = body.removePrefix(it) }
         return NewsItem(
             url = url,
             title = title,
-            snippet = snippetOf(card.text().removePrefix(title)),
-            publishedAt = date,
+            snippet = snippetOf(body),
+            publishedAt = dateRaw?.let { parseDate(it) },
             source = "",
         )
     }
