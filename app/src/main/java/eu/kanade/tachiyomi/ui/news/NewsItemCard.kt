@@ -12,7 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
+import dev.icerock.moko.resources.compose.stringResource
 import androidx.compose.ui.unit.dp
 import eu.kanade.tachiyomi.takami.news.NewsItem
 import eu.kanade.tachiyomi.takami.news.DayMark

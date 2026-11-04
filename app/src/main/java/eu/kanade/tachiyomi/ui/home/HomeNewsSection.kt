@@ -18,7 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
+import dev.icerock.moko.resources.compose.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -35,7 +35,7 @@ import java.util.Date
  * заглушки и ошибки на главной не бывает. Тап открывает запись в браузере.
  */
 @Composable
-fun HomeNewsSection(section: eu.kanade.tachiyomi.ui.home.HomeHubSection) {
+internal fun HomeNewsSection(section: eu.kanade.tachiyomi.ui.home.HomeHubSection) {
     // Спеки Takami — аниме-источники: блок живёт на вкладке аниме.
     if (section != eu.kanade.tachiyomi.ui.home.HomeHubSection.Anime) return
     val context = LocalContext.current
