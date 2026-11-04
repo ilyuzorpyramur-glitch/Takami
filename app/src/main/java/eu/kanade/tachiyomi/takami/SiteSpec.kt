@@ -156,6 +156,8 @@ data class HosterSpec(
     val kind: String,
     /** Шаблон запроса к плееру, если он отдаёт карту отдельно. */
     val apiTemplate: String? = null,
+    /** Шаблон идентификатора плеера в адресе; null — берём urlPattern. */
+    val idRegex: String? = null,
 )
 
 /** Озвучка в разметке источника. */
