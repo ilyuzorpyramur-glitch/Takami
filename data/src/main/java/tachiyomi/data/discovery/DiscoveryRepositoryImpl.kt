@@ -35,7 +35,7 @@ object DiscoveryMapper {
             ?.mapNotNull { it.trim().takeIf(String::isNotEmpty) }
             ?.toList().orEmpty(),
         rating = row.rating,
-        episodes = row.episodes,
+        episodes = row.episodes?.toInt(),
         status = row.status,
     )
 }
