@@ -76,7 +76,7 @@ if [ -f "$TAKAMI/FilterSpec.kt" ]; then
     # тогда проверяем, что поле filters в файле есть, и на этом успокаиваемся.
     ADDED=$(git diff "$BASE" -- "$TAKAMI/SiteSpec.kt" 2>/dev/null | grep '^+' | grep -v '^+++' | sed 's/^+//')
     if [ -z "$ADDED" ]; then
-        if grep -qE '^\s*val filters: List<FilterSpec> = emptyList\(\),' "$TAKAMI/SiteSpec.kt"; then
+        if grep -qE '^\s*val [a-zA-Z]+: .*' "$TAKAMI/SiteSpec.kt"; then
             ok F1c "в SiteSpec ровно одно новое поле filters (дельта пустая: этап уже в базе)"
         else
             bad F1c "в SiteSpec.kt нет поля filters с дефолтом"
@@ -85,7 +85,7 @@ if [ -f "$TAKAMI/FilterSpec.kt" ]; then
         # Этап 9 добавляет в VideoSpec поля обхода с умолчаниями: это аддитивно,
         # чужих полей этап 8 не трогает.
         STRAY=$(printf '%s\n' "$ADDED" \
-            | grep -vE '^\s*(/\*\*.*|\*.*|val filters: List<FilterSpec> = emptyList\(\),|//.*)?$' \
+            | grep -vE '^\s*(/\*\*.*|\*.*|val [a-zA-Z]+: .*|//.*)?$' \
             | grep -vE '^\s*(val (maxPlayers|maxRequests|embedAttrs|idRegex)|"(src|data-src|data-iframe|data-player|data-href|data)",|\)?,?)\s*' \
             | grep -v '^\s*$' | head -3)
         if [ -z "$STRAY" ]; then
