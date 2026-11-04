@@ -21,10 +21,10 @@ object FilterUrl {
         if (chosen.values.values.all { it.isEmpty() }) return base
 
         val question = base.indexOf('?')
-        var path = if (question >= 0) base.substring(0, question) else base
+        val basePath = if (question >= 0) base.substring(0, question) else base
         val savedQuery = if (question >= 0) base.substring(question + 1) else ""
-        val pairs = mutableListOf<String>()
-        if (savedQuery.isNotBlank()) pairs.add(savedQuery)
+        var path = basePath
+        val added = mutableListOf<String>()
 
         for (filter in spec.filters) {
             val raw = chosen.values[filter.key].orEmpty()
@@ -34,21 +34,19 @@ object FilterUrl {
                         val piece = filter.valueTemplate.replace("{v}", encode(value))
                         path = path.trimEnd('/') + "/" + piece.trimStart('/')
                     }
-                    else -> pairs.add(filter.key + "=" + encode(filter.valueTemplate.replace("{v}", value)))
+                    else -> added.add(filter.key + "=" + encode(filter.valueTemplate.replace("{v}", value)))
                 }
             }
         }
-        if (pairs.size == 1 && savedQuery.isNotBlank()) return base
+        // Путь и запрос считаются порознь: path-фильтр не должен теряться
+        // из-за того, что в базовом адресе уже был запрос.
+        if (path == basePath && added.isEmpty()) return base
 
-        var url = path
-        if (pairs.isNotEmpty()) {
-            url += if (savedQuery.isNotBlank()) {
-                "&" + pairs.drop(1).joinToString("&")
-            } else {
-                "?" + pairs.joinToString("&")
-            }
+        val params = buildList {
+            if (savedQuery.isNotBlank()) add(savedQuery)
+            addAll(added)
         }
-        return url
+        return if (params.isEmpty()) path else path + "?" + params.joinToString("&")
     }
 
     /** Выбранное пользователя плюс умолчания из спеки по нетронутым ключам. */

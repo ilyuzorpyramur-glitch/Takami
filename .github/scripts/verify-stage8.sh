@@ -85,10 +85,19 @@ fi
 
 echo "--- версия спеки ---"
 
-if grep -q 'const val SPEC_VERSION = 2' "$TAKAMI/spec/SpecVersion.kt"; then
-    ok F2a "SPEC_VERSION не поднят"
+# Этап 8 не меняет схему спеки, но номер берём из базы: предыдущие этапы
+# его уже поднимали, и жёсткая двойка ломала гейт после слияния.
+VER_REL="${TAKAMI#"$ROOT"/}/spec/SpecVersion.kt"
+BASE_VER=$(git show "$BASE:$VER_REL" 2>/dev/null | grep -oE 'const val SPEC_VERSION = [0-9]+' |
+    head -1 | grep -oE '[0-9]+$')
+CUR_VER=$(grep -oE 'const val SPEC_VERSION = [0-9]+' "$TAKAMI/spec/SpecVersion.kt" |
+    head -1 | grep -oE '[0-9]+$')
+if [ -z "$BASE_VER" ]; then
+    skip F2a "в базе $BASE нет файла версии спеки — сравнивать не с чем"
+elif [ "$BASE_VER" = "$CUR_VER" ]; then
+    ok F2a "SPEC_VERSION не поднят ($CUR_VER)"
 else
-    bad F2a "SPEC_VERSION изменён"
+    bad F2a "SPEC_VERSION изменился: $BASE_VER → $CUR_VER"
 fi
 
 TOUCHED=$(git diff --name-only "$BASE" -- "$TAKAMI/spec/SpecVersion.kt" "$TAKAMI/spec/SpecMigration.kt" "$TAKAMI/spec/SpecRollback.kt" 2>/dev/null)

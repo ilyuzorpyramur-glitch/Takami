@@ -110,4 +110,21 @@ class FilterUrlTest {
 
         url shouldBe "https://example.test/catalog/?page=2&genre=comedy"
     }
+
+    @Test
+    fun `path-фильтр не теряется, если в адресе уже есть запрос`() {
+        val year = FilterSpec(
+            name = "Год",
+            type = FilterSpec.TYPE_SELECT,
+            key = "year",
+            valueTemplate = "year-{v}",
+            inUrl = FilterSpec.IN_PATH,
+            options = listOf(FilterOption("2024", "2024")),
+        )
+        val state = FilterState(mapOf("year" to listOf("2024")))
+
+        val url = FilterUrl.apply("https://example.test/catalog/?page=2", spec(year), state)
+
+        url shouldBe "https://example.test/catalog/year-2024?page=2"
+    }
 }
