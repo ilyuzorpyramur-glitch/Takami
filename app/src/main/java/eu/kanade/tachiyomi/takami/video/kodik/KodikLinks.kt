@@ -19,7 +19,7 @@ object KodikLinks {
     /** Порядок подписи: сервер сверяет её целиком. */
     private val SIGNED = listOf("d", "d_sign", "pd", "pd_sign", "ref", "ref_sign")
 
-    private val QUALITY = Regex(""""(\d{3,4})"\s*:\s*\[(.*?)]""", RegexOption.DOT_MATCHES_ALL)
+    private val QUALITY = Regex(""""(\d{3,4})"\s*:\s*\[(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
 
     private val SOURCE = Regex(""""src"\s*:\s*"([^"]+)"""")
 
