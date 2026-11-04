@@ -445,10 +445,12 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
                 ),
             )
         }
-        for ((key, inputs) in doc.select("input[type=checkbox], input[type=radio]")
+        val groups = doc.select("input[type=checkbox], input[type=radio]")
             .groupBy { it.attr("name") }
             .filterKeys { it.isNotBlank() }
-            .take(MAX_FILTERS - found.size)) {
+            .toList()
+            .take(MAX_FILTERS - found.size)
+        for ((key, inputs) in groups) {
             val options = inputs.mapNotNull { input ->
                 val label = labelOf(input) ?: return@mapNotNull null
                 val value = input.attr("value").ifBlank { label }
@@ -481,7 +483,7 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
     /** Подпись флажка: label[for=id], объемлющий label или соседний текст. */
     private fun labelOf(input: Element): String? {
         val id = input.id()
-        val direct = if (id.isBlank()) null else input.ownerDocument().selectFirst("label[for=$id]")
+        val direct = if (id.isBlank()) null else input.ownerDocument()?.selectFirst("label[for=$id]")
         return (direct?.text() ?: input.closest("label")?.text())?.trim()?.takeIf { it.isNotBlank() }
     }
 
