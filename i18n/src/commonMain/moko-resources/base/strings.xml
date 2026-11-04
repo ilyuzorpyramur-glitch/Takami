@@ -2061,4 +2061,34 @@
     <string name="reels_feed_show_watched">Show watched</string>
     <string name="reels_session_restore_pending">Preparing saved videos…</string>
     <string name="reels_session_buffer_full">Saved feed buffer is full. Watch or skip remaining videos to continue loading.</string>
+    <!-- Свайп-подбор -->
+    <string name="swipe_title">Swipe pick</string>
+    <string name="swipe_counter">Cards left: %1$d</string>
+    <string name="swipe_close">Close</string>
+    <string name="swipe_open">Details</string>
+    <string name="swipe_hide">Hide</string>
+    <string name="swipe_later">Watch later</string>
+    <string name="swipe_undo">Undo</string>
+    <string name="swipe_added">Added to watch later: %1$s</string>
+    <string name="swipe_add_failed">Could not add: find it manually</string>
+    <string name="swipe_later_category">Watch later</string>
+    <string name="swipe_value_none">—</string>
+    <string name="swipe_rating_source">%1$s %2$s</string>
+    <string name="swipe_episodes">Episodes: %1$s</string>
+    <string name="swipe_status_ongoing">Ongoing</string>
+    <string name="swipe_status_finished">Finished</string>
+    <string name="swipe_status_anons">Announced</string>
+    <string name="swipe_status_paused">Paused</string>
+    <string name="swipe_entry_title">Swipe pick</string>
+    <string name="swipe_entry_subtitle">One card at a time: right — watch later, left — hide</string>
+    <string name="swipe_empty_loading_title">Refreshing picks</string>
+    <string name="swipe_empty_loading_body">The list is being built for you</string>
+    <string name="swipe_empty_done_title">That is all for today</string>
+    <string name="swipe_empty_done_body">New cards appear after the next refresh</string>
+    <string name="swipe_empty_offline_title">No connection</string>
+    <string name="swipe_empty_offline_body">Picks will appear when the network is back</string>
+    <string name="swipe_empty_failed_title">Could not load picks</string>
+    <string name="swipe_empty_failed_body">Something went wrong while loading</string>
+    <string name="swipe_refresh">Refresh</string>
+    <string name="swipe_retry">Retry</string>
 </resources>

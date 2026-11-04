@@ -43,8 +43,15 @@ class DiscoveryLibraryAdder {
     }
 
     suspend fun addFromProvider(mediaType: DiscoveryMediaType, title: String, provider: String?): Boolean =
+        addWithId(mediaType, title, provider) != null
+
+    /**
+     * То же добавление, но с идентификатором записи: свайпу нужно назначить
+     * категорию «Посмотреть позже» уже добавленному тайтлу.
+     */
+    suspend fun addWithId(mediaType: DiscoveryMediaType, title: String, provider: String?): Long? =
         withContext(Dispatchers.IO) {
-            if (provider.isNullOrBlank()) return@withContext false
+            if (provider.isNullOrBlank()) return@withContext null
             val clean = normalizeDiscoveryTitle(title)
             try {
                 when (mediaType) {
@@ -56,46 +63,46 @@ class DiscoveryLibraryAdder {
                 throw e
             } catch (e: Exception) {
                 logcat { "[DiscoveryAdd] FAILED '$title' via '$provider': ${e.message}" }
-                false
+                null
             }
         }
 
-    private suspend fun addManga(provider: String, clean: String, query: String): Boolean {
+    private suspend fun addManga(provider: String, clean: String, query: String): Long? {
         val sourceId = Injekt.get<GetEnabledMangaSources>().subscribe().first()
-            .firstOrNull { it.name == provider }?.id ?: return false
-        val source = Injekt.get<MangaSourceManager>().getOrStub(sourceId) as? CatalogueSource ?: return false
+            .firstOrNull { it.name == provider }?.id ?: return null
+        val source = Injekt.get<MangaSourceManager>().getOrStub(sourceId) as? CatalogueSource ?: return null
         val page = withTimeoutOrNull(SOURCE_TIMEOUT_MS) {
             source.getSearchManga(1, query, source.getFilterList())
-        } ?: return false
-        val match = page.mangas.firstOrNull { normalizeDiscoveryTitle(it.title) == clean } ?: return false
+        } ?: return null
+        val match = page.mangas.firstOrNull { normalizeDiscoveryTitle(it.title) == clean } ?: return null
         val added = Injekt.get<NetworkToLocalManga>()
             .await(listOf(match.toDomainManga(sourceId)), autoFavorite = true)
-        return added.isNotEmpty()
+        return added.firstOrNull()?.id
     }
 
-    private suspend fun addAnime(provider: String, clean: String, query: String): Boolean {
+    private suspend fun addAnime(provider: String, clean: String, query: String): Long? {
         val sourceId = Injekt.get<GetEnabledAnimeSources>().subscribe().first()
-            .firstOrNull { it.name == provider }?.id ?: return false
-        val source = Injekt.get<AnimeSourceManager>().getOrStub(sourceId) as? AnimeCatalogueSource ?: return false
+            .firstOrNull { it.name == provider }?.id ?: return null
+        val source = Injekt.get<AnimeSourceManager>().getOrStub(sourceId) as? AnimeCatalogueSource ?: return null
         val page = withTimeoutOrNull(SOURCE_TIMEOUT_MS) {
             source.getSearchAnime(1, query, source.getFilterList())
-        } ?: return false
-        val match = page.animes.firstOrNull { normalizeDiscoveryTitle(it.title) == clean } ?: return false
+        } ?: return null
+        val match = page.animes.firstOrNull { normalizeDiscoveryTitle(it.title) == clean } ?: return null
         val added = Injekt.get<NetworkToLocalAnime>()
             .await(listOf(match.toDomainAnime(sourceId)), autoFavorite = true)
-        return added.isNotEmpty()
+        return added.firstOrNull()?.id
     }
 
-    private suspend fun addNovel(provider: String, clean: String, query: String): Boolean {
+    private suspend fun addNovel(provider: String, clean: String, query: String): Long? {
         val sourceId = Injekt.get<GetEnabledNovelSources>().subscribe().first()
-            .firstOrNull { it.name == provider }?.id ?: return false
-        val source = Injekt.get<NovelSourceManager>().getOrStub(sourceId) as? NovelCatalogueSource ?: return false
+            .firstOrNull { it.name == provider }?.id ?: return null
+        val source = Injekt.get<NovelSourceManager>().getOrStub(sourceId) as? NovelCatalogueSource ?: return null
         val page = withTimeoutOrNull(SOURCE_TIMEOUT_MS) {
             source.getSearchNovels(1, query, source.getFilterList())
-        } ?: return false
-        val match = page.novels.firstOrNull { normalizeDiscoveryTitle(it.title) == clean } ?: return false
+        } ?: return null
+        val match = page.novels.firstOrNull { normalizeDiscoveryTitle(it.title) == clean } ?: return null
         val added = Injekt.get<NetworkToLocalNovel>()
             .await(listOf(match.toDomainNovel(sourceId)), autoFavorite = true)
-        return added.isNotEmpty()
+        return added.firstOrNull()?.id
     }
 }

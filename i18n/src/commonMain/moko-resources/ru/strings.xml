@@ -1854,4 +1854,34 @@
     <string name="reels_album_search_load_more">Загрузить ещё видео</string>
     <string name="reels_session_restore_pending">Подготовка сохранённых видео…</string>
     <string name="reels_session_buffer_full">Буфер сохранения заполнен. Просмотрите или пропустите оставшиеся видео, чтобы продолжить загрузку.</string>
+    <!-- Свайп-подбор -->
+    <string name="swipe_title">Свайп-подбор</string>
+    <string name="swipe_counter">Осталось карточек: %1$d</string>
+    <string name="swipe_close">Закрыть</string>
+    <string name="swipe_open">Подробнее</string>
+    <string name="swipe_hide">Скрыть</string>
+    <string name="swipe_later">Посмотреть позже</string>
+    <string name="swipe_undo">Отменить</string>
+    <string name="swipe_added">Добавлено в «Посмотреть позже»: %1$s</string>
+    <string name="swipe_add_failed">Добавить не удалось — найдите вручную</string>
+    <string name="swipe_later_category">Посмотреть позже</string>
+    <string name="swipe_value_none">—</string>
+    <string name="swipe_rating_source">%1$s %2$s</string>
+    <string name="swipe_episodes">Серий: %1$s</string>
+    <string name="swipe_status_ongoing">Выходит</string>
+    <string name="swipe_status_finished">Завершён</string>
+    <string name="swipe_status_anons">Анонс</string>
+    <string name="swipe_status_paused">Пауза</string>
+    <string name="swipe_entry_title">Свайп-подбор</string>
+    <string name="swipe_entry_subtitle">По одной карточке: вправо — посмотреть позже, влево — скрыть</string>
+    <string name="swipe_empty_loading_title">Обновляем подборку</string>
+    <string name="swipe_empty_loading_body">Список собирается для вас</string>
+    <string name="swipe_empty_done_title">На сегодня всё</string>
+    <string name="swipe_empty_done_body">Новые карточки появятся после обновления подборки</string>
+    <string name="swipe_empty_offline_title">Нет сети</string>
+    <string name="swipe_empty_offline_body">Подборка появится, когда сеть вернётся</string>
+    <string name="swipe_empty_failed_title">Не удалось загрузить</string>
+    <string name="swipe_empty_failed_body">При загрузке подборки произошла ошибка</string>
+    <string name="swipe_refresh">Обновить</string>
+    <string name="swipe_retry">Повторить</string>
 </resources>
