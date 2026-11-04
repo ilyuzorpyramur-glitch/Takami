@@ -1,5 +1,8 @@
 package eu.kanade.tachiyomi.takami
 
+import eu.kanade.tachiyomi.takami.fetch.ChallengePageError
+import eu.kanade.tachiyomi.takami.fetch.HttpStatusError
+import eu.kanade.tachiyomi.takami.fetch.VerificationRequiredError
 import kotlinx.coroutines.Dispatchers
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
@@ -29,7 +32,8 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
 
         val html = runCatching { engine.fetch(url) }.getOrElse {
             ParseFailures.noteFailure(host, "forge", "empty_body")
-            return@withContext ForgeResult.Failure("Страница не загрузилась")
+            // Защита сайта (403, капча) — особый случай для лечения: домен остывает.
+            return@withContext ForgeResult.Failure("Страница не загрузилась", blocked = blocked(it))
         }
         if (html.isBlank()) {
             ParseFailures.noteFailure(host, "forge", "empty_body")
@@ -158,6 +162,18 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             hoster = report.hoster,
             streams = report.streams,
         )
+    }
+
+    /** Признак защиты сайта: 403 или капча. Лечение в этом случае не считает попытку плохой. */
+    private fun blocked(error: Throwable): Boolean {
+        var cause: Throwable? = error
+        repeat(3) {
+            val current = cause ?: return false
+            if (current is HttpStatusError && current.code == 403) return true
+            if (current is ChallengePageError || current is VerificationRequiredError) return true
+            cause = current.cause
+        }
+        return false
     }
 
     /**
@@ -580,5 +596,9 @@ sealed class ForgeResult {
         /** Ссылки с двумя осями: качество и озвучка отдельно. */
         val streams: List<VideoStream> = emptyList(),
     ) : ForgeResult()
-    data class Failure(val reason: String) : ForgeResult()
+    data class Failure(
+        val reason: String,
+        /** Упёрлись в защиту сайта: 403 или капча. */
+        val blocked: Boolean = false,
+    ) : ForgeResult()
 }

@@ -16,6 +16,11 @@ import eu.kanade.tachiyomi.takami.filters.FilterState
 import eu.kanade.tachiyomi.takami.filters.FilterStore
 import eu.kanade.tachiyomi.takami.filters.FilterUrl
 import eu.kanade.tachiyomi.takami.filters.clean
+import eu.kanade.tachiyomi.takami.heal.HealLog
+import eu.kanade.tachiyomi.takami.heal.HealResult
+import eu.kanade.tachiyomi.takami.heal.Healer
+import eu.kanade.tachiyomi.takami.heal.SpecPart
+import eu.kanade.tachiyomi.takami.spec.SpecJournalEntry
 import eu.kanade.tachiyomi.takami.spec.SPEC_VERSION
 import eu.kanade.tachiyomi.takami.spec.SpecHistory
 import eu.kanade.tachiyomi.takami.spec.SpecJournal
@@ -187,6 +192,8 @@ object TakamiForge {
         Fetcher.init(context)
         // Выбор фильтров живёт рядом со спеками: filesDir/filters.json.
         FilterStore.init(context.filesDir)
+        // Журнал лечения — тоже файл рядом: попытки лечения пишутся туда.
+        HealLog.init(context.filesDir)
         val target = File(context.filesDir, DIR).apply { mkdirs() }
         val first = dir == null
         dir = target
@@ -218,6 +225,22 @@ object TakamiForge {
     fun source(host: String): VirtualAnimeSource? = _specs.value
         .firstOrNull { it.host == host }
         ?.let { VirtualAnimeSource(it, engine) }
+
+    /**
+     * Явный запуск лечения: только с экрана «Починить» или из прогона.
+     * Само лечение никогда не стартует.
+     */
+    suspend fun heal(host: String, trigger: String): HealResult {
+        val spec = _specs.value.firstOrNull { it.host == host }
+            ?: return HealResult(false, SpecPart.NONE, "no_source", emptyList(), emptyList())
+        return Healer().heal(spec, trigger)
+    }
+
+    /** Сколько рабочих версий в истории источника: правилу лечения это нужно. */
+    fun historyVersions(host: String): Int = SpecHistory(dir).versions(host).size
+
+    /** Журнал откатов источника: правилу лечения нужен провал шага. */
+    fun rollbackJournal(host: String): List<SpecJournalEntry> = SpecJournal(dir).entries(host)
 
     /**
      * Сохраняет спеку и решает, оставить ли новую версию.

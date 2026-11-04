@@ -26,6 +26,12 @@ data class SpecJournalEntry(
     val failedChecks: List<String> = emptyList(),
     val reason: String,
     val at: Long = 0L,
+    /** Часть спеки из лечения; пусто — обычный откат. */
+    val part: String = "",
+    /** Номер попытки лечения; ноль — обычный откат. */
+    val attempt: Int = 0,
+    /** Решение лечения; пусто — обычный откат. */
+    val decision: String = "",
 )
 
 /**
