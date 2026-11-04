@@ -5,7 +5,7 @@ import io.kotest.matchers.nulls.shouldNotBe
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
-/** Разбор лент и раздела: фикстуры собраны руками, без выдержек из живых страниц. */
+/** Разбор лент и раздела: фикстуры руками. */
 class NewsParserTest {
 
     private val rss = """
@@ -14,7 +14,8 @@ class NewsParserTest {
           <item>
             <title>Первая запись</title>
             <link>https://example.test/news/one.html</link>
-            <description>&lt;p&gt;Короткий анонс&lt;/p&gt; первой записи, второй абзац.</description>
+            <description>&lt;p&gt;Короткий анонс&lt;/p&gt; первой записи,
+            второй абзац.</description>
             <pubDate>Wed, 04 Nov 2026 10:00:00 +0300</pubDate>
           </item>
           <item>
@@ -47,8 +48,10 @@ class NewsParserTest {
     private val section = """
         <html><body>
           <div class="news-list">
-            <div class="news-item"><a href="/news/one.html">Заголовок первой</a><time>04.11.2026</time><p>Анонс первой записи</p></div>
-            <div class="news-item"><a href="/news/two.html">Заголовок второй</a><p>Анонс второй записи</p></div>
+            <div class="news-item"><a href="/news/one.html">Заголовок первой</a>
+            <time>04.11.2026</time><p>Анонс первой записи</p></div>
+            <div class="news-item"><a href="/news/two.html">Заголовок второй</a>
+            <p>Анонс второй записи</p></div>
             <div class="news-item"><p>Ссылки нет</p></div>
           </div>
         </body></html>
@@ -103,7 +106,7 @@ class NewsParserTest {
     }
 
     @Test
-    fun `анонс обрезается по словам, теги вырезаны, переносы схлопнуты`() {
+    fun `анонс обрезается по словам и по строкам`() {
         val long = "<p>" + ("слово ".repeat(80)).trim() + "</p>"
         val snippet = NewsParser.snippetOf(long)
 

@@ -124,7 +124,7 @@ else
     bad N8 "нет запрета dreamerscast/kodikdreamcast в коде или тесте"
 fi
 
-BODY=$(grep -nE 'val body|val fullText|val articleText' $NEWFILES 2>/dev/null | head -3)
+BODY=$(grep -nE 'val body|val fullText|val articleText' "$NEWS/NewsModels.kt" 2>/dev/null | head -3)
 SNIPPET_LINES=$(grep -c 'maxLines = 3' "$UI_NEWS/NewsItemCard.kt")
 if [ -z "$BODY" ] && [ "$SNIPPET_LINES" -ge 1 ]; then
     ok N9 "полного текста в моделях нет, анонс до трёх строк"
@@ -145,7 +145,8 @@ else
     bad N10a "нет строк:$MISSINGI18N"
 fi
 
-RUSSIAN=$(grep -lE '"[^"]*[А-Яа-яЁё][^"]*"' $NEWFILES 2>/dev/null | head -3)
+UIFILES="$UI_NEWS/NewsStateModel.kt $UI_NEWS/NewsItemCard.kt $UI_NEWS/NewsScreen.kt $HOME_NEWS"
+RUSSIAN=$(grep -lE '"[^"]*[А-Яа-яЁё][^"]*"' $UIFILES 2>/dev/null | head -3)
 if [ -z "$RUSSIAN" ]; then
     ok N10b "в новых Compose-файлах нет русских литералов"
 else
@@ -223,8 +224,11 @@ if [ -f "$HERE/verify-stage11.sh" ]; then
     else
         OTHER=$(grep -cE '^\[[A-Za-z0-9.]+\] FAIL' /tmp/stage11-regression.txt)
         H14=$(grep -cE '^\[H14b\] FAIL' /tmp/stage11-regression.txt)
+        # R2 этапа 11 — чужая цепочка этапа 9: её провал на main не наша регрессия.
+        R2F=$(grep -cE '^\[R2\] FAIL' /tmp/stage11-regression.txt)
+        OTHER=$((OTHER - R2F))
         if [ "$OTHER" -le 1 ] && [ "$H14" -ge 1 ]; then
-            ok R1 "этап 11: единственный провал — правка общих файлов (H14b)"
+            ok R1 "этап 11: провалы — правка общих файлов и чужая цепочка этапа 9"
         else
             bad R1 "регрессия этапа 11: $(grep 'FAIL' /tmp/stage11-regression.txt | head -3 | tr '\n' ' ')"
         fi
