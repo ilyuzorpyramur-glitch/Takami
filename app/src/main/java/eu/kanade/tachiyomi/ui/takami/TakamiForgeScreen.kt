@@ -355,8 +355,10 @@ private fun PreviewStep(ready: ForgeState.Ready) {
                     style = MaterialTheme.typography.bodySmall,
                 )
             } else {
-                Text("Лента новинок не найдена — «Популярное» и" +
-                    "«Новое» будут одинаковыми", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Лента новинок не найдена — «Популярное» и «Новое» будут одинаковыми",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }
