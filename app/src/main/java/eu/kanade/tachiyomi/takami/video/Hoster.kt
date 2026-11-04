@@ -118,7 +118,7 @@ object Chain {
             if (depth >= spec.video.iframeDepth) continue
             Drafts.candidates(spec, page, url).forEach { queue.addLast(it to depth + 1) }
         }
-        return ChainResult(links.distinctBy { it.url }, blocked)
+        return ChainResult(Quality.byUrl(links).distinctBy { it.url }, blocked)
     }
 
     /** Карта от плеера по шаблону из спеки: отдельный запрос, один раз. */

@@ -14,6 +14,8 @@ data class VideoStream(
     val url: String,
     val kind: String = "",
     val single: Boolean = false,
+    /** Заголовки окна: уходят в плеер вместе со ссылкой. */
+    val headers: Map<String, String> = emptyMap(),
 ) {
     /** Подпись озвучки для экрана. */
     val dubbingText: String
@@ -34,6 +36,7 @@ data class VideoStream(
             url = link.url,
             kind = link.kind.ifBlank { kindOfUrl(link.url) },
             single = link.single,
+            headers = link.headers,
         )
 
         /** Тип файла по адресу; пусто — тип не определить. */

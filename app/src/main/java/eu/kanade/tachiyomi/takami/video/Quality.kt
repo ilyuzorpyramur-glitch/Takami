@@ -19,6 +19,8 @@ data class QualityLink(
     val kind: String = "",
     /** Качество единственное: размножать его на список нельзя. */
     val single: Boolean = false,
+    /** Заголовки окна: без них найденная ссылка может не играть. */
+    val headers: Map<String, String> = emptyMap(),
 )
 
 /** Нормализация метки качества и порядок вариантов. */
@@ -92,6 +94,23 @@ object Quality {
                     .thenByDescending { rank(it.quality) },
             )
             .map { if (single) it.copy(single = true) else it }
+    }
+
+    /**
+     * Склейка повторов по адресу: остаются непустые заголовки первого,
+     * у которого они есть.
+     */
+    fun byUrl(links: List<QualityLink>): List<QualityLink> {
+        val merged = linkedMapOf<String, QualityLink>()
+        for (link in links) {
+            val seen = merged[link.url]
+            merged[link.url] = when {
+                seen == null -> link
+                seen.headers.isNotEmpty() -> seen
+                else -> seen.copy(headers = link.headers)
+            }
+        }
+        return merged.values.toList()
     }
 
     /**
