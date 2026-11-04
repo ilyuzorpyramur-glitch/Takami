@@ -6,7 +6,8 @@ import kotlinx.serialization.Serializable
 /**
  * Описание источника, собранное генератором на устройстве.
  *
- * Это не код и не APK: набор селекторов и шаблонов, который интерпретирует [SpecEngine].
+  * Это не код и не APK: набор селекторов и шаблонов, который
+  * интерпретирует [SpecEngine].
  * Хранится в filesDir, никуда не отправляется.
  */
 @Serializable
@@ -17,7 +18,9 @@ data class SiteSpec(
     val lang: String = "ru",
     val engine: String = ENGINE_GENERIC,
     val iconUrl: String? = null,
-    /** Иконка, выбранная пользователем: путь к файлу на устройстве. */
+    /**
+     * Иконка, выбранная пользователем: путь к файлу на
+     * устройстве. */
     val iconPath: String? = null,
     /** auto | max — как выбирать качество из доступных. */
     val qualityPreference: String = "auto",
@@ -30,13 +33,28 @@ data class SiteSpec(
     val video: VideoSpec = VideoSpec(),
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
-    /** Версия схемы, на которой записана спека. Файл без неё — первая версия. */
+    /**
+     * Версия схемы, на которой записана спека. Файл без неё
+     * — первая версия. */
     val version: Int = SPEC_VERSION,
-    /** Сколько проверок источника прошло при последней сборке спеки. */
+    /**
+     * Сколько проверок источника прошло при последней
+     * сборке спеки. */
     val checksPassed: Int = 0,
+    /** Озвучки, найденные в разметке: их показывает экран выбора. */
+    val dubbingSpecs: List<DubbingSpec> = emptyList(),
 ) {
     val sourceId: Long
         get() = TakamiForge.sourceIdOf(host)
+
+    /**
+     * Озвучки, которые видит пользователь.
+     *
+      * Пусто — сайт дорожки не различает, и экран говорит
+      * об этом прямо,
+     * а не показывает пустой список.
+     */
+    fun availableDubbings(): List<String> = dubbingSpecs.map { it.name }.distinct()
 
     companion object {
         const val ENGINE_DLE = "dle"
@@ -109,4 +127,40 @@ data class VideoSpec(
     val labelRegex: String = "\\[([^\\]]{1,16})]\\s*(https?://[^\\s\"',]+)",
     /** Сколько раз разворачивать вложенные iframe. */
     val iframeDepth: Int = 2,
+    /**
+     * Известные плееры: по адресу понятно, как читать карту
+     * файлов. */
+    val hosters: List<HosterSpec> = emptyList(),
+    /** Откуда брать качество: label | url | hls | map | auto. */
+    val qualityFrom: String = "auto",
+    /** Читать мастер-плейлист HLS, чтобы получить список качеств. */
+    val hlsMaster: Boolean = true,
+    /** Порядок качеств в списке: сначала лучшее. */
+    val preferred: List<String> = listOf("1080p", "720p", "480p", "360p"),
+    /** Как искать озвучки: tabs | labels | none | auto. */
+    val dubbingMode: String = "auto",
+    /** Выбранное качество для запуска: auto, max или метка. */
+    val chosen: String = "auto",
+)
+
+/** Известный плеер: имя, адрес и способ разбора. */
+@Serializable
+data class HosterSpec(
+    /** playerjs, alloha, sibnet — без чужих брендов сайтов. */
+    val name: String,
+    /** Шаблон адреса, по которому узнаём плеер. */
+    val urlPattern: String,
+    /** playerjs | hls | iframe */
+    val kind: String,
+    /** Шаблон запроса к плееру, если он отдаёт карту отдельно. */
+    val apiTemplate: String? = null,
+)
+
+/** Озвучка в разметке источника. */
+@Serializable
+data class DubbingSpec(
+    val name: String,
+    val selector: String,
+    val episodesSelector: String? = null,
+    val language: String? = null,
 )
