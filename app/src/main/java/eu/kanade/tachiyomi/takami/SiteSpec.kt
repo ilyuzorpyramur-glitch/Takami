@@ -143,6 +143,14 @@ data class VideoSpec(
     val dubbingMode: String = "auto",
     /** Выбранное качество для запуска: auto, max или метка. */
     val chosen: String = "auto",
+    /** Сколько плееров на странице смотрим за один раз. */
+    val maxPlayers: Int = 8,
+    /** Потолок запросов на одну серию: карта, мастер, вложенные кадры. */
+    val maxRequests: Int = 12,
+    /** Атрибуты, в которых лежит адрес встраивания. */
+    val embedAttrs: List<String> = listOf(
+        "src", "data-src", "data-iframe", "data-player", "data-href", "data",
+    ),
 )
 
 /** Известный плеер: имя, адрес и способ разбора. */

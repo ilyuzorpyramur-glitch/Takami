@@ -120,7 +120,9 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
 
         val episode = episodes.firstOrNull()
         if (episode != null) {
-            streams = runCatching { engine.streams(spec, episode) }.getOrNull().orEmpty()
+            val found = runCatching { engine.linkReport(spec, episode) }.getOrNull()
+                ?: LinkReport()
+            streams = found.streams
             qualities = streams.map { it.quality }.filter { it.isNotBlank() }.distinct()
             // Озвучки берём из ссылок: в разметке они есть не всегда.
             dubbings = Dubbing.names(streams.map { it.dubbing })
@@ -129,7 +131,11 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
             val media = playable != null && looksLikeMedia(engine.probe(playable.url, episode.url))
             val videoOk = streams.isNotEmpty() && media
             if (!videoOk) {
-                val error = if (streams.isEmpty()) "no_links" else "no_video"
+                val error = when {
+                    streams.isEmpty() && found.blocked -> "player_blocked"
+                    streams.isEmpty() -> "no_links"
+                    else -> "no_video"
+                }
                 ParseFailures.noteFailure(spec.host, "video", error, spec.version)
             }
             results += CheckResult(
@@ -137,6 +143,7 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
                 title = "Видео",
                 ok = videoOk,
                 note = when {
+                    streams.isEmpty() && found.blocked -> "плеер не раскрылся"
                     streams.isEmpty() -> "ссылок нет"
                     !media -> "ссылка не отдаёт поток"
                     else -> streams.size.toString() + " ссылок"
