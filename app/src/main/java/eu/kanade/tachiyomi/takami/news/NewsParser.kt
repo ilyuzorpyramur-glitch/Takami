@@ -127,13 +127,15 @@ object NewsParser {
             ?: link.text().trim()
         if (title.isEmpty()) return null
         val dateRaw = spec.dateSelector?.let { card.selectFirst(it)?.text() }
-        var body = card.text()
-        if (body.startsWith(title)) body = body.removePrefix(title).trimStart()
-        dateRaw?.takeIf { it.isNotBlank() && body.startsWith(it) }?.let { body = body.removePrefix(it).trimStart() }
+        // Анонс берём из копии карточки без ссылки-заголовка и без даты:
+        // вычитание по тексту зависит от пробелов в разметке.
+        val snippetCard = card.clone()
+        snippetCard.select(spec.linkSelector.ifBlank { "a[href]" }).remove()
+        spec.dateSelector?.takeIf { it.isNotBlank() }?.let { snippetCard.select(it).remove() }
         return NewsItem(
             url = url,
             title = title,
-            snippet = snippetOf(body),
+            snippet = snippetOf(snippetCard.text()),
             publishedAt = dateRaw?.let { parseDate(it) },
             source = "",
         )
