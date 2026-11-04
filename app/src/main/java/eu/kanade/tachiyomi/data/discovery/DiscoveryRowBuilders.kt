@@ -250,7 +250,7 @@ class DiscoveryTrendRowBuilder(
                     provider = item.provider,
                     rating = item.rating,
                     episodes = item.episodes,
-                    status = item.releaseStatus,
+                    status = RatingScale.statusKey(item.releaseStatus),
                     score = 0.0,
                     genres = item.genres,
                 )
@@ -435,7 +435,7 @@ class DiscoveryTasteRowBuilder(
                 provider = item.provider,
                 rating = item.rating,
                 episodes = item.episodes,
-                status = item.releaseStatus,
+                status = RatingScale.statusKey(item.releaseStatus),
                 // Базовый скор совпадения жанров; приоритетные жанры бустятся единым within-row ranker'ом в policy.
                 score = tasteScore(item.genres, activeProfile),
                 genres = item.genres,

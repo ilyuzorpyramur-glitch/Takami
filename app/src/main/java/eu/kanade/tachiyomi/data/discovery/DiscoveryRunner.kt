@@ -1,1 +1,786 @@
-package eu.kanade.tachiyomi.data.discovery\n\nimport eu.kanade.domain.discovery.service.DiscoveryPreferences\nimport eu.kanade.domain.source.service.SourcePreferences\nimport eu.kanade.tachiyomi.data.suggestions.SuggestionCoordinator\nimport kotlinx.coroutines.CancellationException\nimport kotlinx.coroutines.flow.first\nimport kotlinx.coroutines.flow.firstOrNull\nimport kotlinx.coroutines.sync.Mutex\nimport kotlinx.coroutines.sync.withLock\nimport tachiyomi.core.common.util.system.logcat\nimport tachiyomi.domain.discovery.model.DiscoveryMediaType\nimport tachiyomi.domain.discovery.model.DiscoveryReleaseStatus\nimport tachiyomi.domain.discovery.model.DiscoveryRowType\nimport tachiyomi.domain.discovery.model.DiscoverySignalType\nimport tachiyomi.domain.discovery.model.DiscoverySuggestion\nimport tachiyomi.domain.discovery.model.normalizeDiscoveryTitle\nimport tachiyomi.domain.discovery.repository.DiscoveryRepository\nimport uy.kohesive.injekt.Injekt\nimport uy.kohesive.injekt.api.get\n\ninterface DiscoverySeedSources {\n    suspend fun candidates(mediaType: DiscoveryMediaType): List<DiscoverySeedInput>\n    suspend fun historyCleanTitles(mediaType: DiscoveryMediaType): Set<String>\n}\n\n/**\n * Плагин (расширение) как единица участия в подборках: один ключ (pkgName / id novel-плагина)\n * объединяет все языковые варианты источников расширения — без дублей в пикере и в рядах ленты.\n * [langs] — карта sourceId → ISO-код языка варианта; заполняется провайдером,\n * пустая карта = легаси-провайдер (язык неизвестен, прежняя семантика выбора).\n */\ndata class DiscoveryInstalledPlugin(\n    val key: String,\n    val sourceIds: List<Long>,\n    val langs: Map<Long, String> = emptyMap(),\n)\n\n/**\n * Представительный источник плагина с языковым преференсом.\n *\n * Порядок: (1) варианты на языке приложения или английском имеют абсолютный приоритет —\n * это фикс «случайного языка» мультиязычного плагина при пустой библиотеке (вес 0 у всех\n * вариантов → прежний тай-брейк min(id) выбирал произвольный язык); (2) внутри группы —\n * max вес библиотеки (реально читаемый язык важнее); (3) при равенстве — lang-приоритет\n * (appLang > en); (4) тай-брейк — min id (стабильность). Пустая карта [langs] = легаси:\n * только вес → min id.\n */\ninternal fun selectPluginRepresentative(\n    memberIds: Set<Long>,\n    weights: Map<Long, Int>,\n    langs: Map<Long, String>,\n    appLang: String,\n): Long? {\n    if (memberIds.isEmpty()) return null\n    val langOf: (Long) -> String? = { langs[it]?.lowercase() }\n    val langPriority: (Long) -> Int = { id ->\n        when (langOf(id)) {\n            appLang -> 0\n            "en" -> 1\n            null -> 2\n            else -> 3\n        }\n    }\n    val withReadHistory = memberIds.filter { (weights[it] ?: 0) > 0 }\n    val candidates = withReadHistory.ifEmpty {\n        val preferred = memberIds.filter { langPriority(it) in 0..1 }\n        preferred.ifEmpty { memberIds.toList() }\n    }\n    return candidates.sortedWith(\n        compareByDescending<Long> { weights[it] ?: 0 }\n            .thenBy(langPriority)\n            .thenBy { it },\n    ).firstOrNull()\n}\n\n/** Reserve for persistence and teardown when splitting the worker deadline. */\nprivate const val WORKER_BUDGET_MARGIN_MS = 10_000L\n\n/** Even with many media types, one run must keep enough time to be useful. */\nprivate const val MIN_MEDIA_BUDGET_MS = 20_000L\n\n/**\n * Оркестратор фонового обновления ленты «Для тебя»:\n * сиды → строители рядов → [DiscoveryCoordinator] → персист успешных рядов.\n * Провалившийся ряд НЕ затирает свой кэш (в [DiscoveryFeed.rows] его нет).\n */\nclass DiscoveryRunner(\n    private val repository: DiscoveryRepository,\n    private val preferences: DiscoveryPreferences,\n    private val seedSources: DiscoverySeedSources,\n    private val coordinatorFactory: (\n        List<DiscoveryRowBuilder>,\n    ) -> DiscoveryCoordinator = { DiscoveryCoordinator(it, rowLimit = 50) },\n    private val seedSelector: DiscoverySeedSelector = DiscoverySeedSelector(),\n    private val trendingFactory: () -> DiscoveryTrendingSource = { CompositeTrendingSource() },\n    private val sourcePreferencesProvider: () -> SourcePreferences = { Injekt.get() },\n    private val suggestionCoordinatorFactory: () -> SuggestionCoordinator = {\n        SuggestionCoordinator(sourcePreferencesProvider())\n    },\n    private val sourceCatalog: DiscoverySourceCatalog = AppDiscoverySourceCatalog(),\n    /** Сигнал о провале рядов для UI-баннера «показан кэш»; дефолт персистит CSV в prefs. */\n    private val failedRowsSink: suspend (DiscoveryMediaType, Set<DiscoveryRowType>) -> Unit = { media, rows ->\n        preferences.lastFailedRows(media).set(rows.joinToString(",") { it.key })\n    },\n    private val fallbackSourceIdProvider: (DiscoveryMediaType) -> Long = { mediaType ->\n        runCatching {\n            when (mediaType) {\n                DiscoveryMediaType.ANIME -> Injekt.get<tachiyomi.domain.source.anime.service.AnimeSourceManager>()\n                    .getOnlineSources().firstOrNull()?.id ?: -1L\n                DiscoveryMediaType.MANGA -> Injekt.get<tachiyomi.domain.source.manga.service.MangaSourceManager>()\n                    .getOnlineSources().firstOrNull()?.id ?: -1L\n                DiscoveryMediaType.NOVEL -> Injekt.get<tachiyomi.domain.source.novel.service.NovelSourceManager>()\n                    .getOnlineSources().firstOrNull()?.id ?: -1L\n            }\n        }.getOrDefault(-1L)\n    },\n    /** Установленные онлайн-источники медиатипа — пул ручного режима участия плагинов. */\n    private val installedPluginsProvider: suspend (\n        DiscoveryMediaType,\n    ) -> List<DiscoveryInstalledPlugin> = { mediaType ->\n        runCatching {\n            when (mediaType) {\n                DiscoveryMediaType.ANIME -> {\n                    val catalogueIds = Injekt.get<tachiyomi.domain.source.anime.service.AnimeSourceManager>()\n                        .getCatalogueSources().mapTo(HashSet()) { it.id }\n                    Injekt.get<eu.kanade.tachiyomi.extension.anime.AnimeExtensionManager>()\n                        .installedExtensionsFlow.first().map { ext ->\n                            val ids = ext.sources.map { it.id }.filter { it in catalogueIds }\n                            DiscoveryInstalledPlugin(\n                                key = ext.pkgName,\n                                sourceIds = ids,\n                                langs = ext.sources.filter { it.id in catalogueIds }.associate { it.id to it.lang },\n                            )\n                        }.filter { it.sourceIds.isNotEmpty() }\n                }\n                DiscoveryMediaType.MANGA -> {\n                    val catalogueIds = Injekt.get<tachiyomi.domain.source.manga.service.MangaSourceManager>()\n                        .getCatalogueSources().mapTo(HashSet()) { it.id }\n                    Injekt.get<eu.kanade.tachiyomi.extension.manga.MangaExtensionManager>()\n                        .installedExtensionsFlow.first().map { ext ->\n                            val ids = ext.sources.map { it.id }.filter { it in catalogueIds }\n                            DiscoveryInstalledPlugin(\n                                key = ext.pkgName,\n                                sourceIds = ids,\n                                langs = ext.sources.filter { it.id in catalogueIds }.associate { it.id to it.lang },\n                            )\n                        }.filter { it.sourceIds.isNotEmpty() }\n                }\n                DiscoveryMediaType.NOVEL -> {\n                    val novelSourceManager = Injekt.get<tachiyomi.domain.source.novel.service.NovelSourceManager>()\n                    val catalogueIds = novelSourceManager.getCatalogueSources().mapTo(HashSet()) { it.id }\n                    val manager = Injekt.get<eu.kanade.tachiyomi.extension.novel.NovelExtensionManager>()\n                    // Только источники с плагином: OmniSource (−42), локальный (0) и сироты не участвуют.\n                    groupSourcesByPlugin(catalogueIds) { manager.getPluginId(it) }\n                        .map { (key, ids) ->\n                            val langs = ids.mapNotNull { id ->\n                                runCatching { id to novelSourceManager.getOrStub(id).lang }.getOrNull()\n                            }.toMap()\n                            DiscoveryInstalledPlugin(key, ids, langs)\n                        }\n                }\n            }\n        }.getOrDefault(emptyList())\n    },\n) {\n\n    suspend fun run(\n        mediaTypes: List<DiscoveryMediaType> = DiscoveryMediaType.entries,\n        isManualRefresh: Boolean = false,\n        totalBudgetMs: Long? = null,\n        isConfigurationRefresh: Boolean = false,\n    ): Map<DiscoveryMediaType, DiscoveryRunOutcome> {\n        if (!preferences.discoveryEnabled().get()) {\n            return mediaTypes.associateWith { mediaType ->\n                DiscoveryRunOutcome(\n                    mediaType = mediaType,\n                    status = DiscoveryRunStatus.SKIPPED,\n                )\n            }\n        }\n        // Split the caller's deadline across media types instead of letting each\n        // type spend the full worker budget on its own.\n        val perMediaBudgetMs = totalBudgetMs?.let { total ->\n            ((total - WORKER_BUDGET_MARGIN_MS).coerceAtLeast(MIN_MEDIA_BUDGET_MS)) /\n                mediaTypes.size.coerceAtLeast(1)\n        }\n        val outcomes = mutableMapOf<DiscoveryMediaType, DiscoveryRunOutcome>()\n        for (mediaType in mediaTypes) {\n            try {\n                val outcome = runFor(\n                    mediaType,\n                    isManualRefresh = isManualRefresh && !isConfigurationRefresh,\n                    mediaBudgetMs = perMediaBudgetMs,\n                    isConfigurationRefresh = isConfigurationRefresh,\n                )\n                outcomes[mediaType] = outcome\n            } catch (e: CancellationException) {\n                throw e\n            } catch (e: Exception) {\n                logcat { "[DiscoveryRunner] $mediaType FAILED: ${e.message}" }\n                preferences.lastGenerationStatus(mediaType).set(DiscoveryRunStatus.FAILED.name)\n                preferences.lastGenerationAt(mediaType).set(System.currentTimeMillis())\n                outcomes[mediaType] = DiscoveryRunOutcome(\n                    mediaType = mediaType,\n                    status = DiscoveryRunStatus.FAILED,\n                    cause = e,\n                )\n            }\n        }\n        return outcomes\n    }\n\n    private val mediaRunLocks: java.util.concurrent.ConcurrentHashMap<DiscoveryMediaType, Mutex> =\n        java.util.concurrent.ConcurrentHashMap()\n\n    private suspend fun trackTitles(mediaType: DiscoveryMediaType, entryId: Long): List<String> =\n        when (mediaType) {\n            DiscoveryMediaType.ANIME ->\n                Injekt.get<tachiyomi.domain.track.anime.repository.AnimeTrackRepository>()\n                    .getTracksByAnimeId(entryId).map { it.title }\n            DiscoveryMediaType.MANGA ->\n                Injekt.get<tachiyomi.domain.track.manga.repository.MangaTrackRepository>()\n                    .getTracksByMangaId(entryId).map { it.title }\n            DiscoveryMediaType.NOVEL ->\n                Injekt.get<tachiyomi.domain.track.novel.repository.NovelTrackRepository>()\n                    .getTracksByNovelId(entryId).map { it.title }\n        }\n\n    private suspend fun runFor(\n        mediaType: DiscoveryMediaType,\n        isManualRefresh: Boolean = false,\n        mediaBudgetMs: Long? = null,\n        isConfigurationRefresh: Boolean = false,\n    ): DiscoveryRunOutcome =\n        mediaRunLocks.getOrPut(mediaType) { Mutex() }\n            .withLock {\n                try {\n                    runForLocked(mediaType, isManualRefresh, mediaBudgetMs, isConfigurationRefresh)\n                } finally {\n                    DiscoveryProgressTracker.reset(mediaType)\n                }\n            }\n\n    private suspend fun runForLocked(\n        mediaType: DiscoveryMediaType,\n        isManualRefresh: Boolean = false,\n        mediaBudgetMs: Long? = null,\n        isConfigurationRefresh: Boolean = false,\n    ): DiscoveryRunOutcome {\n        DiscoveryProgressTracker.update(\n            isRunning = true,\n            mediaType = mediaType,\n            stageText = "Подготовка рекомендаций...",\n            current = 0,\n            total = 4,\n        )\n        val candidates = seedSources.candidates(mediaType)\n        val candidateRefreshCount = if (isManualRefresh) {\n            preferences.manualRefreshCount(mediaType).get() + 1\n        } else {\n            preferences.manualRefreshCount(mediaType).get()\n        }\n        val candidateBackgroundCycle = if (isManualRefresh || isConfigurationRefresh) {\n            preferences.backgroundCycleCount(mediaType).get()\n        } else {\n            preferences.backgroundCycleCount(mediaType).get() + 1\n        }\n        val seedOffset = if (isManualRefresh) manualSeedOffset(candidateRefreshCount) else 0\n        val totalSeedBudget = preferences.seedCount().get().coerceIn(1, 5)\n        // Taste Learning Engine: один запрос сигнал-лога на генерацию — и на\n        // feedback-сиды, и на source-аффинити участия плагинов, и на fold/merge вкуса,\n        // и на «просмотрено»-исключение ниже.\n        val allSignals = runCatching { repository.getSignals(mediaType) }.getOrDefault(emptyList())\n        val feedbackSeeds = selectFeedbackSeeds(allSignals, mediaType, limit = minOf(2, totalSeedBudget))\n        val librarySeedBudget = (totalSeedBudget - feedbackSeeds.size).coerceAtLeast(0)\n        val feedbackCleanTitles = feedbackSeeds.mapTo(HashSet()) { it.cleanTitle }\n        val libraryCandidates = if (librarySeedBudget > 0) {\n            candidates.filterNot { normalizeDiscoveryTitle(it.title) in feedbackCleanTitles }\n        } else {\n            emptyList()\n        }\n        val seeds = if (librarySeedBudget > 0) {\n            seedSelector.select(\n                libraryCandidates,\n                SeedSettings(\n                    maxSeeds = librarySeedBudget,\n                    useCompleted = preferences.seedCompleted().get(),\n                    useActive14 = preferences.seedActive14().get(),\n                    useAdded = preferences.seedAdded().get(),\n                    completedWindowDays = preferences.seedCompletedDays().get().toLong(),\n                    activeWindowDays = preferences.seedActiveDays().get().toLong(),\n                ),\n                offset = seedOffset,\n            )\n        } else {\n            emptyList()\n        }\n        val sourcePreferences = sourcePreferencesProvider()\n        val preferredSourceId = when (mediaType) {\n            DiscoveryMediaType.ANIME -> sourcePreferences.lastUsedAnimeSource().get()\n            DiscoveryMediaType.MANGA -> sourcePreferences.lastUsedMangaSource().get()\n            DiscoveryMediaType.NOVEL -> sourcePreferences.lastUsedNovelSource().get()\n        }\n        // Участие плагинов: единица — расширение (все языковые варианты), не источник.\n        // auto = топ-3 плагинов по весу библиотеки, manual = набор пользователя (cap 8).\n        val plugins = installedPluginsProvider(mediaType)\n        val sourceWeights = candidates.filter { it.sourceId > 0 }.groupingBy { it.sourceId }.eachCount()\n        val isManualMode = preferences.discoverySourceMode(mediaType).get() == "manual"\n        val learnedSourceAffinity = foldLearnedTasteProfile(signals = allSignals).sourceAffinity\n        val pluginStats = plugins.mapNotNull { plugin ->\n            val representative = selectPluginRepresentative(\n                memberIds = plugin.sourceIds.toSet(),\n                weights = sourceWeights,\n                langs = plugin.langs,\n                appLang = java.util.Locale.getDefault().language.lowercase(),\n            ) ?: return@mapNotNull null\n            DiscoveryPluginStat(\n                key = plugin.key,\n                representative = representative,\n                memberIds = plugin.sourceIds.toSet(),\n                weight = if (isManualMode) 1 else plugin.sourceIds.sumOf { sourceWeights[it] ?: 0 },\n                affinity = learnedSourceAffinity[plugin.key] ?: 0.0,\n            )\n        }.sortedWith(\n            compareByDescending<DiscoveryPluginStat> {\n                applySourceAffinity(it.weight, it.affinity, isManualMode = isManualMode)\n            }.thenBy { it.representative },\n        )\n        val effectiveSourceWeights = pluginStats.associate {\n            it.representative to applySourceAffinity(it.weight, it.affinity, isManualMode = isManualMode)\n        }\n        val excludedKeys = parseKeyCsv(preferences.discoverySourceExcluded(mediaType).get())\n        val participation = if (pluginStats.isEmpty()) {\n            // Плагины неизвестны (юнит-тесты / расширения ещё не загружены при раннем старте):\n            // легаси-порядок по весу библиотеки без исключений (нет маппинга ключ→источник).\n            resolveSourceParticipation(\n                mode = preferences.discoverySourceMode(mediaType).get(),\n                excludedIds = emptySet(),\n                weightOrder = rankSourceIds(candidates, limit = Int.MAX_VALUE),\n                lastUsedId = preferredSourceId,\n                fallbackId = fallbackSourceIdProvider(mediaType),\n            )\n        } else {\n            val excludedIds = pluginStats.filter { it.key in excludedKeys }.mapTo(HashSet()) { it.representative }\n            // lastUsed/fallback исключённого плагина не должен просочиться в primary.\n            val lastUsedPlugin = pluginStats.firstOrNull { preferredSourceId in it.memberIds }\n            val effectiveLastUsed = if (lastUsedPlugin == null || lastUsedPlugin.key !in excludedKeys) {\n                preferredSourceId\n            } else {\n                -1L\n            }\n            val rawFallback = fallbackSourceIdProvider(mediaType)\n            val fallbackPlugin = pluginStats.firstOrNull { rawFallback in it.memberIds }\n            val effectiveFallback = when {\n                rawFallback <= 0 -> rawFallback\n                fallbackPlugin == null -> rawFallback\n                fallbackPlugin.key in excludedKeys -> -1L\n                else -> fallbackPlugin.representative\n            }\n            resolveSourceParticipation(\n                mode = preferences.discoverySourceMode(mediaType).get(),\n                excludedIds = excludedIds,\n                weightOrder = pluginStats.map { it.representative },\n                lastUsedId = effectiveLastUsed,\n                fallbackId = effectiveFallback,\n            )\n        }\n\n        val seedsWithTracks = seeds.map { seed ->\n            val trackTitles = runCatching { trackTitles(mediaType, seed.entryId) }.getOrDefault(emptyList())\n            if (trackTitles.isEmpty()) seed else seed.copy(altTitles = (seed.altTitles + trackTitles).distinct())\n        }\n\n        val useExternal = preferences.externalProvidersEnabled().get()\n        val disabledLikeProviders = buildSet {\n            if (!useExternal) {\n                addAll(listOf("AniList", "Shikimori", "MyAnimeList", "MangaUpdates", "NovelUpdates"))\n            } else {\n                if (!sourcePreferences.suggestionsUseShikimori().get()) add("Shikimori")\n                if (!sourcePreferences.suggestionsUseMangaUpdatesNovel().get()) add("MangaUpdates")\n                if (!sourcePreferences.suggestionsUseNovelUpdates().get()) add("NovelUpdates")\n            }\n        }\n        val cachedSuggestions = runCatching { repository.subscribe(mediaType).firstOrNull() }.getOrNull().orEmpty()\n        val currentSuggestions = cachedSuggestions.filterNot {\n            (it.rowType == DiscoveryRowType.LIKE && it.provider in disabledLikeProviders) ||\n                (\n                    !useExternal && it.rowType == DiscoveryRowType.TASTE &&\n                        ((it.sourceId ?: 0L) <= 0L || it.sourceUrl.isNullOrBlank())\n                    )\n        }\n        val existingRowItems = currentSuggestions\n            .groupBy { it.rowType }\n            .mapValues { (_, items) ->\n                items.map { suggestion ->\n                    DiscoveryRowItem(\n                        title = suggestion.title,\n                        cleanTitle = suggestion.cleanTitle,\n                        coverUrl = suggestion.coverUrl,\n                        reason = suggestion.reason,\n                        seedTitle = suggestion.seedTitle,\n                        provider = suggestion.provider,\n                        score = suggestion.score,\n                        sourceId = suggestion.sourceId,\n                        sourceUrl = suggestion.sourceUrl,\n                        genres = suggestion.genres,\n                    )\n                }\n            }\n        // Explicit opt-outs still apply when an incomplete replacement preserves the compatible cache.\n        val cachedLike = cachedSuggestions.filter { it.rowType == DiscoveryRowType.LIKE }\n        val currentLike = currentSuggestions.filter { it.rowType == DiscoveryRowType.LIKE }\n        if (preferences.rowLikeEnabled().get() && currentLike != cachedLike) {\n            repository.replaceRows(mediaType, DiscoveryRowType.LIKE, currentLike)\n        }\n        val cachedTaste = cachedSuggestions.filter { it.rowType == DiscoveryRowType.TASTE }\n        val currentTaste = currentSuggestions.filter { it.rowType == DiscoveryRowType.TASTE }\n        if (!useExternal && preferences.rowTasteEnabled().get() && currentTaste != cachedTaste) {\n            repository.replaceRows(mediaType, DiscoveryRowType.TASTE, currentTaste)\n        }\n        val shownCutoffMap = runCatching {\n            repository.getRecentExclusionsWithTimestamp(mediaType)\n        }.getOrDefault(emptyMap())\n        val shownTitles = shownCutoffMap.keys\n        val recentCleanTitles = if (isManualRefresh) {\n            currentSuggestions.mapTo(HashSet()) { it.cleanTitle } + shownTitles\n        } else {\n            shownTitles\n        }\n        val pageOffset = when {\n            isConfigurationRefresh -> 1\n            isManualRefresh -> manualPageOffset(candidateRefreshCount)\n            else -> backgroundPageOffset(candidateBackgroundCycle)\n        }\n\n        // Taste Learning Engine: fold сигнал-лога и слияние с библиотечным профилем.\n        // Плавный старт (blend) — при пустом логе merge возвращает библиотечный профиль как есть.\n        // Неявный негатив: тайтл показан ≥3 раз за 48ч без явного сигнала → жанры\n        // получают мягкий минус. Синтез на лету (не пишется в БД), явные сигналы важнее.\n        val libraryTasteProfile = buildTasteProfile(candidates)\n        val libraryProfileGenres = libraryTasteProfile.map { it.first }\n        val implicitNegatives = runCatching {\n            synthesizeImplicitNegatives(\n                shownWithCount = repository.getShownWithCount(mediaType),\n                explicitSignals = allSignals,\n                currentSuggestions = currentSuggestions,\n                mediaType = mediaType,\n                profileGenres = libraryProfileGenres,\n            )\n        }.getOrDefault(emptyList())\n        val learnedProfile = foldLearnedTasteProfile(signals = allSignals + implicitNegatives)\n        val mergedTasteProfile = mergeTasteProfiles(\n            libraryProfile = libraryTasteProfile,\n            learned = learnedProfile,\n        )\n        // «Просмотрено/прочитано»: нейтральное исключение — consumed-тайтлы не\n        // попадают в новые генерации ленты (вкусовой профиль они не трогают).\n        val consumedCleanTitles = allSignals\n            .filter { it.signalType.excludesFromFeed }\n            .mapTo(HashSet()) { it.cleanTitle }\n\n        val genreFilterSpec = preferences.genreFilterSpec()\n        // One budget for the whole media run: every row shares the deadline and\n        // the details allowance, so rows cannot multiply the worker cost.\n        // Genre-selected mode verifies deep pages of a few rich sources, so it\n        // gets a larger allowance; the deadline remains the real guard.\n        val verificationBudget = DiscoveryVerificationBudget(\n            budgetMs = mediaBudgetMs ?: DiscoveryVerificationBudget.DEFAULT_MEDIA_BUDGET_MS,\n            maxDetails = if (genreFilterSpec.requiredGenres.isNotEmpty()) {\n                DiscoveryVerificationBudget.DEFAULT_REQUIRED_MAX_DETAILS\n            } else {\n                DiscoveryVerificationBudget.DEFAULT_MAX_DETAILS\n            },\n        )\n        val baseContext = DiscoveryBuildContext(\n            mediaType = mediaType,\n            seeds = seedsWithTracks,\n            feedbackSeeds = feedbackSeeds,\n            libraryCleanTitles = candidates.mapTo(HashSet()) { normalizeDiscoveryTitle(it.title) },\n            historyCleanTitles = seedSources.historyCleanTitles(mediaType),\n            hiddenCleanTitles = repository.getHiddenTitles(mediaType) + consumedCleanTitles,\n            tasteProfile = mergedTasteProfile,\n            blacklistedTags = repository.getBlacklistedTags(mediaType),\n            ignoredGenres = genreFilterSpec.ignoredGenres,\n            // V1: статус-фильтр трендов — CSV из настроек, пусто = без фильтра.\n            releaseStatuses = DiscoveryReleaseStatus.parseCsv(preferences.releaseStatusFilter().get()),\n            // V3: жанровые фильтры — полная спецификация с режимами строгости и сопоставления.\n            priorityGenres = genreFilterSpec.priorityGenres,\n            requiredGenres = genreFilterSpec.requiredGenres,\n            genreFilterSpec = genreFilterSpec,\n            sourceId = participation.primarySourceId,\n            // C1 + участие плагинов: состав определяет resolveSourceParticipation\n            // (auto — топ-3 по весу библиотеки, manual — все выбранные).\n            sourceIds = participation.sourceIds,\n            sourceWeights = effectiveSourceWeights,\n            recentCleanTitles = recentCleanTitles,\n            shownCutoffMap = shownCutoffMap,\n            // Ручной рефреш: тайтлы текущей ленты не возвращаются stale-добором —\n            // наполнение ряда реально сменяется, а не «новые + всё старое».\n            currentFeedCleanTitles = if (isManualRefresh) {\n                currentSuggestions.mapTo(HashSet()) { it.cleanTitle }\n            } else {\n                emptySet()\n            },\n            existingRowItems = existingRowItems,\n            pageOffset = pageOffset,\n            verificationBudget = verificationBudget,\n        )\n        // TASTE and SOURCE otherwise run the same required-genre catalogue pass\n        // twice and then the coordinator dedupes one of them away. Share the\n        // pass and give the rows disjoint slices instead.\n        val requiredGenres = genreFilterSpec.requiredGenres\n        val sharedGenreQuery = if (\n            requiredGenres.isNotEmpty() &&\n            preferences.rowTasteEnabled().get() &&\n            preferences.rowSourceEnabled().get()\n        ) {\n            val ids = participation.sourceIds.filter { it > 0L }\n                .ifEmpty { listOf(participation.primarySourceId).filter { it > 0L } }\n            if (ids.isEmpty()) {\n                null\n            } else {\n                val rotation = (pageOffset - 1).coerceAtLeast(0) % ids.size\n                val ordered = ids.drop(rotation) + ids.take(rotation)\n                SharedRequiredGenreQuery {\n                    queryDiscoveryGenreSources(\n                        catalog = sourceCatalog,\n                        media = mediaType,\n                        sourceIds = ordered,\n                        genres = requiredGenres.toList(),\n                        page = pageOffset,\n                        releaseStatuses = baseContext.releaseStatuses,\n                        policy = baseContext.candidatePolicy,\n                        maxConcurrency = 4,\n                        timeoutMs = genreSourceTimeoutMs(\n                            verificationBudget,\n                            ordered.size,\n                            maxConcurrency = 4,\n                        ),\n                        hydrate = true,\n                        targetItems = RICH_SOURCE_TARGET * 2,\n                        perSourceCap = RICH_SOURCE_TARGET * 2,\n                        budget = verificationBudget,\n                    )\n                }\n            }\n        } else {\n            null\n        }\n        val context = if (sharedGenreQuery != null) {\n            baseContext.copy(sharedGenreQuery = sharedGenreQuery)\n        } else {\n            baseContext\n        }\n        logcat {\n            "[Discovery] refresh media=$mediaType manual=$isManualRefresh " +\n                "configuration=$isConfigurationRefresh page=$pageOffset " +\n                "statuses=${context.releaseStatuses} sources=${context.sourceIds} primary=${context.sourceId}"\n        }\n        // Выключенные в настройках ряды: чистим их записи в БД, чтобы UI не показывал «зомби».\n        // TREND — чисто внешний ряд; LIKE при выключенных внешних провайдерах строится из плагинов.\n        if (!preferences.rowLikeEnabled().get()) {\n            repository.replaceRows(mediaType, tachiyomi.domain.discovery.model.DiscoveryRowType.LIKE, emptyList())\n        }\n        if (!preferences.rowTasteEnabled().get()) {\n            repository.replaceRows(mediaType, tachiyomi.domain.discovery.model.DiscoveryRowType.TASTE, emptyList())\n        }\n        if (!preferences.rowTrendEnabled().get() || !useExternal) {\n            repository.replaceRows(mediaType, tachiyomi.domain.discovery.model.DiscoveryRowType.TREND, emptyList())\n        }\n        if (!preferences.rowSourceEnabled().get()) {\n            repository.replaceRows(mediaType, tachiyomi.domain.discovery.model.DiscoveryRowType.SOURCE, emptyList())\n        }\n        val builders = buildList {\n            if (preferences.rowLikeEnabled().get()) {\n                add(\n                    DiscoveryLikeRowBuilder(\n                        suggestionCoordinator = suggestionCoordinatorFactory(),\n                        catalog = sourceCatalog,\n                        includeExternal = useExternal,\n                    ),\n                )\n            }\n            if (preferences.rowTasteEnabled().get()) {\n                add(\n                    DiscoveryTasteRowBuilder(\n                        trending = trendingFactory(),\n                        catalog = sourceCatalog,\n                        // «Только плагины»: жанровые рекомендации строятся из каталогов,\n                        // внешние жанровые провайдеры не опрашиваются.\n                        includeExternal = useExternal,\n                        sortProvider = {\n                            if (preferences.trendSort().get() == "score") TrendSort.SCORE else TrendSort.POPULARITY\n                        },\n                    ),\n                )\n            }\n            if (preferences.rowTrendEnabled().get() && useExternal) {\n                add(\n                    DiscoveryTrendRowBuilder(\n                        trending = trendingFactory(),\n                        catalog = sourceCatalog,\n                        seasonProvider = {\n                            when (preferences.trendSeason().get()) {\n                                "next" -> TrendSeason.NEXT\n                                "both" -> TrendSeason.BOTH\n                                else -> TrendSeason.CURRENT\n                            }\n                        },\n                        sortProvider = {\n                            if (preferences.trendSort().get() == "score") TrendSort.SCORE else TrendSort.POPULARITY\n                        },\n                    ),\n                )\n            }\n            if (preferences.rowSourceEnabled().get()) {\n                add(DiscoverySourceRowBuilder(sourceCatalog, rowCap = 50))\n            }\n        }\n        if (builders.isEmpty()) {\n            failedRowsSink(mediaType, emptySet())\n            preferences.lastGenerationStatus(mediaType).set(DiscoveryRunStatus.SKIPPED.name)\n            preferences.lastGenerationAt(mediaType).set(System.currentTimeMillis())\n            return DiscoveryRunOutcome(\n                mediaType = mediaType,\n                status = DiscoveryRunStatus.SKIPPED,\n                attemptedRows = emptySet(),\n            )\n        }\n\n        val attemptedRows = builders.map { it.rowType }.toSet()\n        val persistedRows = mutableSetOf<DiscoveryRowType>()\n        val coordinator = coordinatorFactory(builders)\n        val feed = coordinator.streamFeed(context) { rowType, items ->\n            // Пустой ряд НЕ перезаписывает кэш: прежняя подборка живёт до следующего\n            // успешного непустого результата (защита от «всё пропало» при деградации провайдеров).\n            if (items.isEmpty()) {\n                logcat { "[DiscoveryRunner] $mediaType row $rowType empty — cache preserved" }\n                return@streamFeed\n            }\n            persistedRows += rowType\n            repository.replaceRows(\n                mediaType = mediaType,\n                rowType = rowType,\n                items = items.map { item ->\n                    DiscoverySuggestion(\n                        id = 0L,\n                        mediaType = mediaType,\n                        rowType = rowType,\n                        title = item.title,\n                        cleanTitle = item.cleanTitle,\n                        coverUrl = item.coverUrl,\n                        reason = item.reason,\n                        seedTitle = item.seedTitle,\n                        provider = item.provider,\n                        score = item.score,\n                        // Перезаписывается индексом списка внутри replaceRows.\n                        position = 0L,\n                        createdAt = System.currentTimeMillis(),\n                        sourceId = item.sourceId,\n                        sourceUrl = item.sourceUrl,\n                        genres = item.genres,\n                    )\n                },\n            )\n        }\n        val fillAudit = buildDiscoveryFillAudit(\n            mediaType = mediaType,\n            rawCandidates = feed.rawCandidates,\n            finalRows = feed.rows,\n            context = context,\n            detailsUsed = verificationBudget.detailsUsed,\n            detailsAllowance = verificationBudget.detailsAllowance,\n        )\n        logcat { fillAudit.logLine() }\n        logcat {\n            "[DiscoveryRunner] $mediaType done: rows=${feed.rows.mapValues { it.value.size }} failed=${feed.failedRows}"\n        }\n        // «Только плагины»: пустой TASTE-ряд (нет подходящих плагин-тайтлов) не должен\n        // оставлять в кэше внешние тайтлы — «пустой ряд не перезаписывает» здесь\n        // мешает явному выбору пользователя, чистим вручную. НО: упавший ряд (network)\n        // — не «честно пустой», его кэш не трогаем (feed.rows[T]=null при падении).\n        if (!useExternal && feed.isConclusiveEmpty(DiscoveryRowType.TASTE)) {\n            repository.replaceRows(mediaType, DiscoveryRowType.TASTE, emptyList())\n        }\n        // Статус-фильтр активен: пустой ряд (нет тайтлов выбранного статуса) не должен\n        // жить старым кэшем с НЕсоответствующими статусами — иначе «выбран Завершённый,\n        // а показывается всякое» из старой генерации. Чистим явно. НО: упавший ряд\n        // (провайдер/сеть отвалились) — не «честно пустой», его кэш сохраняем, иначе\n        // при отвале сети с включённым фильтром пропадала бы вся лента.\n        if (context.releaseStatuses.isNotEmpty() || context.requiredGenres.isNotEmpty()) {\n            tachiyomi.domain.discovery.model.DiscoveryRowType.entries.forEach { rowType ->\n                if (feed.isConclusiveEmpty(rowType)) {\n                    repository.replaceRows(mediaType, rowType, emptyList())\n                }\n            }\n        }\n        // Замороженные ряды: «честно пустой» LIKE при пустых сидах и TASTE при пустом профиле\n        // не должны вечно таскать кэш прошлых генераций.\n        if (feed.isConclusiveEmpty(DiscoveryRowType.LIKE) &&\n            context.seeds.isEmpty()\n        ) {\n            repository.replaceRows(mediaType, DiscoveryRowType.LIKE, emptyList())\n        }\n        if (feed.isConclusiveEmpty(DiscoveryRowType.TASTE) &&\n            context.tasteProfile.isEmpty() &&\n            context.requiredGenres.isEmpty() &&\n            context.priorityGenres.isEmpty()\n        ) {\n            repository.replaceRows(mediaType, DiscoveryRowType.TASTE, emptyList())\n        }\n\n        val actualExecutedRows = feed.rows.keys + feed.failedRows\n        val allExecutedFailed = actualExecutedRows.isNotEmpty() && feed.failedRows.containsAll(actualExecutedRows)\n        val hasPartialFailures = feed.failedRows.isNotEmpty() ||\n            feed.degradedRows.isNotEmpty() ||\n            (attemptedRows.isNotEmpty() && actualExecutedRows.size < attemptedRows.size)\n\n        val status = when {\n            allExecutedFailed -> DiscoveryRunStatus.FAILED\n            hasPartialFailures -> DiscoveryRunStatus.PARTIAL\n            else -> DiscoveryRunStatus.SUCCESS\n        }\n\n        if (actualExecutedRows.isNotEmpty() && !allExecutedFailed) {\n            if (isManualRefresh) {\n                preferences.manualRefreshCount(mediaType).set(candidateRefreshCount)\n            } else if (!isConfigurationRefresh) {\n                preferences.backgroundCycleCount(mediaType).set(candidateBackgroundCycle)\n            }\n        }\n        failedRowsSink(mediaType, feed.failedRows)\n        DiscoveryProgressTracker.update(\n            isRunning = true,\n            mediaType = mediaType,\n            stageText = "Готово",\n            current = builders.size,\n            total = builders.size,\n        )\n\n        preferences.lastGenerationStatus(mediaType).set(status.name)\n        preferences.lastGenerationAt(mediaType).set(System.currentTimeMillis())\n\n        return DiscoveryRunOutcome(\n            mediaType = mediaType,\n            status = status,\n            attemptedRows = attemptedRows,\n            failedRows = feed.failedRows,\n            degradedRows = feed.degradedRows,\n            persistedRows = persistedRows,\n        )\n    }\n}\n\n/**\n * Статистика плагина для резолва участия: репрезентативный источник, суммарный вес\n * библиотеки и Taste-аффинити из сигнал-лога (см. [applySourceAffinity]).\n */\nprivate data class DiscoveryPluginStat(\n    val key: String,\n    val representative: Long,\n    val memberIds: Set<Long>,\n    val weight: Int,\n    val affinity: Double = 0.0,\n)\n\n/**\n * Оффсет ротации сидов ручного рефреша: шаг 1 (свободный счётчик, без cap).\n * Шаг 2 с предварительным % 20 посещал только половину позиций окна при чётных\n * размерах пула и циклился на 20 — селектор сам приводится по distinct.size,\n * шаг 1 гарантированно обходит все позиции при любом размере.\n */\ninternal fun manualSeedOffset(refreshCount: Int): Int = refreshCount\n\n/**\n * Страница провайдеров/каталогов ручного рефреша: цикл 10 страниц (2..11).\n * Цикл 4 полностью повторял выдачу уже к 5-му ручному рефрешу.\n */\ninternal fun manualPageOffset(refreshCount: Int): Int = ((refreshCount - 1) % 10) + 2\n\n/**\n * Страница фонового цикла: 1..10, шагом по номеру цикла. Первый фон-прогон — страница 1\n * (совпадает с прежним поведением), далее каждый цикл уходит глубже выдачи провайдера.\n */\ninternal fun backgroundPageOffset(cycleCount: Int): Int = ((cycleCount - 1).mod(10)) + 1\n
+package eu.kanade.tachiyomi.data.discovery
+
+import eu.kanade.domain.discovery.service.DiscoveryPreferences
+import eu.kanade.domain.source.service.SourcePreferences
+import eu.kanade.tachiyomi.data.suggestions.SuggestionCoordinator
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import tachiyomi.core.common.util.system.logcat
+import tachiyomi.domain.discovery.model.DiscoveryMediaType
+import tachiyomi.domain.discovery.model.DiscoveryReleaseStatus
+import tachiyomi.domain.discovery.model.DiscoveryRowType
+import tachiyomi.domain.discovery.model.DiscoverySignalType
+import tachiyomi.domain.discovery.model.DiscoverySuggestion
+import tachiyomi.domain.discovery.model.normalizeDiscoveryTitle
+import tachiyomi.domain.discovery.repository.DiscoveryRepository
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+
+interface DiscoverySeedSources {
+    suspend fun candidates(mediaType: DiscoveryMediaType): List<DiscoverySeedInput>
+    suspend fun historyCleanTitles(mediaType: DiscoveryMediaType): Set<String>
+}
+
+/**
+ * Плагин (расширение) как единица участия в подборках: один ключ (pkgName / id novel-плагина)
+ * объединяет все языковые варианты источников расширения — без дублей в пикере и в рядах ленты.
+ * [langs] — карта sourceId → ISO-код языка варианта; заполняется провайдером,
+ * пустая карта = легаси-провайдер (язык неизвестен, прежняя семантика выбора).
+ */
+data class DiscoveryInstalledPlugin(
+    val key: String,
+    val sourceIds: List<Long>,
+    val langs: Map<Long, String> = emptyMap(),
+)
+
+/**
+ * Представительный источник плагина с языковым преференсом.
+ *
+ * Порядок: (1) варианты на языке приложения или английском имеют абсолютный приоритет —
+ * это фикс «случайного языка» мультиязычного плагина при пустой библиотеке (вес 0 у всех
+ * вариантов → прежний тай-брейк min(id) выбирал произвольный язык); (2) внутри группы —
+ * max вес библиотеки (реально читаемый язык важнее); (3) при равенстве — lang-приоритет
+ * (appLang > en); (4) тай-брейк — min id (стабильность). Пустая карта [langs] = легаси:
+ * только вес → min id.
+ */
+internal fun selectPluginRepresentative(
+    memberIds: Set<Long>,
+    weights: Map<Long, Int>,
+    langs: Map<Long, String>,
+    appLang: String,
+): Long? {
+    if (memberIds.isEmpty()) return null
+    val langOf: (Long) -> String? = { langs[it]?.lowercase() }
+    val langPriority: (Long) -> Int = { id ->
+        when (langOf(id)) {
+            appLang -> 0
+            "en" -> 1
+            null -> 2
+            else -> 3
+        }
+    }
+    val withReadHistory = memberIds.filter { (weights[it] ?: 0) > 0 }
+    val candidates = withReadHistory.ifEmpty {
+        val preferred = memberIds.filter { langPriority(it) in 0..1 }
+        preferred.ifEmpty { memberIds.toList() }
+    }
+    return candidates.sortedWith(
+        compareByDescending<Long> { weights[it] ?: 0 }
+            .thenBy(langPriority)
+            .thenBy { it },
+    ).firstOrNull()
+}
+
+/** Reserve for persistence and teardown when splitting the worker deadline. */
+private const val WORKER_BUDGET_MARGIN_MS = 10_000L
+
+/** Even with many media types, one run must keep enough time to be useful. */
+private const val MIN_MEDIA_BUDGET_MS = 20_000L
+
+/**
+ * Оркестратор фонового обновления ленты «Для тебя»:
+ * сиды → строители рядов → [DiscoveryCoordinator] → персист успешных рядов.
+ * Провалившийся ряд НЕ затирает свой кэш (в [DiscoveryFeed.rows] его нет).
+ */
+class DiscoveryRunner(
+    private val repository: DiscoveryRepository,
+    private val preferences: DiscoveryPreferences,
+    private val seedSources: DiscoverySeedSources,
+    private val coordinatorFactory: (
+        List<DiscoveryRowBuilder>,
+    ) -> DiscoveryCoordinator = { DiscoveryCoordinator(it, rowLimit = 50) },
+    private val seedSelector: DiscoverySeedSelector = DiscoverySeedSelector(),
+    private val trendingFactory: () -> DiscoveryTrendingSource = { CompositeTrendingSource() },
+    private val sourcePreferencesProvider: () -> SourcePreferences = { Injekt.get() },
+    private val suggestionCoordinatorFactory: () -> SuggestionCoordinator = {
+        SuggestionCoordinator(sourcePreferencesProvider())
+    },
+    private val sourceCatalog: DiscoverySourceCatalog = AppDiscoverySourceCatalog(),
+    /** Сигнал о провале рядов для UI-баннера «показан кэш»; дефолт персистит CSV в prefs. */
+    private val failedRowsSink: suspend (DiscoveryMediaType, Set<DiscoveryRowType>) -> Unit = { media, rows ->
+        preferences.lastFailedRows(media).set(rows.joinToString(",") { it.key })
+    },
+    private val fallbackSourceIdProvider: (DiscoveryMediaType) -> Long = { mediaType ->
+        runCatching {
+            when (mediaType) {
+                DiscoveryMediaType.ANIME -> Injekt.get<tachiyomi.domain.source.anime.service.AnimeSourceManager>()
+                    .getOnlineSources().firstOrNull()?.id ?: -1L
+                DiscoveryMediaType.MANGA -> Injekt.get<tachiyomi.domain.source.manga.service.MangaSourceManager>()
+                    .getOnlineSources().firstOrNull()?.id ?: -1L
+                DiscoveryMediaType.NOVEL -> Injekt.get<tachiyomi.domain.source.novel.service.NovelSourceManager>()
+                    .getOnlineSources().firstOrNull()?.id ?: -1L
+            }
+        }.getOrDefault(-1L)
+    },
+    /** Установленные онлайн-источники медиатипа — пул ручного режима участия плагинов. */
+    private val installedPluginsProvider: suspend (
+        DiscoveryMediaType,
+    ) -> List<DiscoveryInstalledPlugin> = { mediaType ->
+        runCatching {
+            when (mediaType) {
+                DiscoveryMediaType.ANIME -> {
+                    val catalogueIds = Injekt.get<tachiyomi.domain.source.anime.service.AnimeSourceManager>()
+                        .getCatalogueSources().mapTo(HashSet()) { it.id }
+                    Injekt.get<eu.kanade.tachiyomi.extension.anime.AnimeExtensionManager>()
+                        .installedExtensionsFlow.first().map { ext ->
+                            val ids = ext.sources.map { it.id }.filter { it in catalogueIds }
+                            DiscoveryInstalledPlugin(
+                                key = ext.pkgName,
+                                sourceIds = ids,
+                                langs = ext.sources.filter { it.id in catalogueIds }.associate { it.id to it.lang },
+                            )
+                        }.filter { it.sourceIds.isNotEmpty() }
+                }
+                DiscoveryMediaType.MANGA -> {
+                    val catalogueIds = Injekt.get<tachiyomi.domain.source.manga.service.MangaSourceManager>()
+                        .getCatalogueSources().mapTo(HashSet()) { it.id }
+                    Injekt.get<eu.kanade.tachiyomi.extension.manga.MangaExtensionManager>()
+                        .installedExtensionsFlow.first().map { ext ->
+                            val ids = ext.sources.map { it.id }.filter { it in catalogueIds }
+                            DiscoveryInstalledPlugin(
+                                key = ext.pkgName,
+                                sourceIds = ids,
+                                langs = ext.sources.filter { it.id in catalogueIds }.associate { it.id to it.lang },
+                            )
+                        }.filter { it.sourceIds.isNotEmpty() }
+                }
+                DiscoveryMediaType.NOVEL -> {
+                    val novelSourceManager = Injekt.get<tachiyomi.domain.source.novel.service.NovelSourceManager>()
+                    val catalogueIds = novelSourceManager.getCatalogueSources().mapTo(HashSet()) { it.id }
+                    val manager = Injekt.get<eu.kanade.tachiyomi.extension.novel.NovelExtensionManager>()
+                    // Только источники с плагином: OmniSource (−42), локальный (0) и сироты не участвуют.
+                    groupSourcesByPlugin(catalogueIds) { manager.getPluginId(it) }
+                        .map { (key, ids) ->
+                            val langs = ids.mapNotNull { id ->
+                                runCatching { id to novelSourceManager.getOrStub(id).lang }.getOrNull()
+                            }.toMap()
+                            DiscoveryInstalledPlugin(key, ids, langs)
+                        }
+                }
+            }
+        }.getOrDefault(emptyList())
+    },
+) {
+
+    suspend fun run(
+        mediaTypes: List<DiscoveryMediaType> = DiscoveryMediaType.entries,
+        isManualRefresh: Boolean = false,
+        totalBudgetMs: Long? = null,
+        isConfigurationRefresh: Boolean = false,
+    ): Map<DiscoveryMediaType, DiscoveryRunOutcome> {
+        if (!preferences.discoveryEnabled().get()) {
+            return mediaTypes.associateWith { mediaType ->
+                DiscoveryRunOutcome(
+                    mediaType = mediaType,
+                    status = DiscoveryRunStatus.SKIPPED,
+                )
+            }
+        }
+        // Split the caller's deadline across media types instead of letting each
+        // type spend the full worker budget on its own.
+        val perMediaBudgetMs = totalBudgetMs?.let { total ->
+            ((total - WORKER_BUDGET_MARGIN_MS).coerceAtLeast(MIN_MEDIA_BUDGET_MS)) /
+                mediaTypes.size.coerceAtLeast(1)
+        }
+        val outcomes = mutableMapOf<DiscoveryMediaType, DiscoveryRunOutcome>()
+        for (mediaType in mediaTypes) {
+            try {
+                val outcome = runFor(
+                    mediaType,
+                    isManualRefresh = isManualRefresh && !isConfigurationRefresh,
+                    mediaBudgetMs = perMediaBudgetMs,
+                    isConfigurationRefresh = isConfigurationRefresh,
+                )
+                outcomes[mediaType] = outcome
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logcat { "[DiscoveryRunner] $mediaType FAILED: ${e.message}" }
+                preferences.lastGenerationStatus(mediaType).set(DiscoveryRunStatus.FAILED.name)
+                preferences.lastGenerationAt(mediaType).set(System.currentTimeMillis())
+                outcomes[mediaType] = DiscoveryRunOutcome(
+                    mediaType = mediaType,
+                    status = DiscoveryRunStatus.FAILED,
+                    cause = e,
+                )
+            }
+        }
+        return outcomes
+    }
+
+    private val mediaRunLocks: java.util.concurrent.ConcurrentHashMap<DiscoveryMediaType, Mutex> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    private suspend fun trackTitles(mediaType: DiscoveryMediaType, entryId: Long): List<String> =
+        when (mediaType) {
+            DiscoveryMediaType.ANIME ->
+                Injekt.get<tachiyomi.domain.track.anime.repository.AnimeTrackRepository>()
+                    .getTracksByAnimeId(entryId).map { it.title }
+            DiscoveryMediaType.MANGA ->
+                Injekt.get<tachiyomi.domain.track.manga.repository.MangaTrackRepository>()
+                    .getTracksByMangaId(entryId).map { it.title }
+            DiscoveryMediaType.NOVEL ->
+                Injekt.get<tachiyomi.domain.track.novel.repository.NovelTrackRepository>()
+                    .getTracksByNovelId(entryId).map { it.title }
+        }
+
+    private suspend fun runFor(
+        mediaType: DiscoveryMediaType,
+        isManualRefresh: Boolean = false,
+        mediaBudgetMs: Long? = null,
+        isConfigurationRefresh: Boolean = false,
+    ): DiscoveryRunOutcome =
+        mediaRunLocks.getOrPut(mediaType) { Mutex() }
+            .withLock {
+                try {
+                    runForLocked(mediaType, isManualRefresh, mediaBudgetMs, isConfigurationRefresh)
+                } finally {
+                    DiscoveryProgressTracker.reset(mediaType)
+                }
+            }
+
+    private suspend fun runForLocked(
+        mediaType: DiscoveryMediaType,
+        isManualRefresh: Boolean = false,
+        mediaBudgetMs: Long? = null,
+        isConfigurationRefresh: Boolean = false,
+    ): DiscoveryRunOutcome {
+        DiscoveryProgressTracker.update(
+            isRunning = true,
+            mediaType = mediaType,
+            stageText = "Подготовка рекомендаций...",
+            current = 0,
+            total = 4,
+        )
+        val candidates = seedSources.candidates(mediaType)
+        val candidateRefreshCount = if (isManualRefresh) {
+            preferences.manualRefreshCount(mediaType).get() + 1
+        } else {
+            preferences.manualRefreshCount(mediaType).get()
+        }
+        val candidateBackgroundCycle = if (isManualRefresh || isConfigurationRefresh) {
+            preferences.backgroundCycleCount(mediaType).get()
+        } else {
+            preferences.backgroundCycleCount(mediaType).get() + 1
+        }
+        val seedOffset = if (isManualRefresh) manualSeedOffset(candidateRefreshCount) else 0
+        val totalSeedBudget = preferences.seedCount().get().coerceIn(1, 5)
+        // Taste Learning Engine: один запрос сигнал-лога на генерацию — и на
+        // feedback-сиды, и на source-аффинити участия плагинов, и на fold/merge вкуса,
+        // и на «просмотрено»-исключение ниже.
+        val allSignals = runCatching { repository.getSignals(mediaType) }.getOrDefault(emptyList())
+        val feedbackSeeds = selectFeedbackSeeds(allSignals, mediaType, limit = minOf(2, totalSeedBudget))
+        val librarySeedBudget = (totalSeedBudget - feedbackSeeds.size).coerceAtLeast(0)
+        val feedbackCleanTitles = feedbackSeeds.mapTo(HashSet()) { it.cleanTitle }
+        val libraryCandidates = if (librarySeedBudget > 0) {
+            candidates.filterNot { normalizeDiscoveryTitle(it.title) in feedbackCleanTitles }
+        } else {
+            emptyList()
+        }
+        val seeds = if (librarySeedBudget > 0) {
+            seedSelector.select(
+                libraryCandidates,
+                SeedSettings(
+                    maxSeeds = librarySeedBudget,
+                    useCompleted = preferences.seedCompleted().get(),
+                    useActive14 = preferences.seedActive14().get(),
+                    useAdded = preferences.seedAdded().get(),
+                    completedWindowDays = preferences.seedCompletedDays().get().toLong(),
+                    activeWindowDays = preferences.seedActiveDays().get().toLong(),
+                ),
+                offset = seedOffset,
+            )
+        } else {
+            emptyList()
+        }
+        val sourcePreferences = sourcePreferencesProvider()
+        val preferredSourceId = when (mediaType) {
+            DiscoveryMediaType.ANIME -> sourcePreferences.lastUsedAnimeSource().get()
+            DiscoveryMediaType.MANGA -> sourcePreferences.lastUsedMangaSource().get()
+            DiscoveryMediaType.NOVEL -> sourcePreferences.lastUsedNovelSource().get()
+        }
+        // Участие плагинов: единица — расширение (все языковые варианты), не источник.
+        // auto = топ-3 плагинов по весу библиотеки, manual = набор пользователя (cap 8).
+        val plugins = installedPluginsProvider(mediaType)
+        val sourceWeights = candidates.filter { it.sourceId > 0 }.groupingBy { it.sourceId }.eachCount()
+        val isManualMode = preferences.discoverySourceMode(mediaType).get() == "manual"
+        val learnedSourceAffinity = foldLearnedTasteProfile(signals = allSignals).sourceAffinity
+        val pluginStats = plugins.mapNotNull { plugin ->
+            val representative = selectPluginRepresentative(
+                memberIds = plugin.sourceIds.toSet(),
+                weights = sourceWeights,
+                langs = plugin.langs,
+                appLang = java.util.Locale.getDefault().language.lowercase(),
+            ) ?: return@mapNotNull null
+            DiscoveryPluginStat(
+                key = plugin.key,
+                representative = representative,
+                memberIds = plugin.sourceIds.toSet(),
+                weight = if (isManualMode) 1 else plugin.sourceIds.sumOf { sourceWeights[it] ?: 0 },
+                affinity = learnedSourceAffinity[plugin.key] ?: 0.0,
+            )
+        }.sortedWith(
+            compareByDescending<DiscoveryPluginStat> {
+                applySourceAffinity(it.weight, it.affinity, isManualMode = isManualMode)
+            }.thenBy { it.representative },
+        )
+        val effectiveSourceWeights = pluginStats.associate {
+            it.representative to applySourceAffinity(it.weight, it.affinity, isManualMode = isManualMode)
+        }
+        val excludedKeys = parseKeyCsv(preferences.discoverySourceExcluded(mediaType).get())
+        val participation = if (pluginStats.isEmpty()) {
+            // Плагины неизвестны (юнит-тесты / расширения ещё не загружены при раннем старте):
+            // легаси-порядок по весу библиотеки без исключений (нет маппинга ключ→источник).
+            resolveSourceParticipation(
+                mode = preferences.discoverySourceMode(mediaType).get(),
+                excludedIds = emptySet(),
+                weightOrder = rankSourceIds(candidates, limit = Int.MAX_VALUE),
+                lastUsedId = preferredSourceId,
+                fallbackId = fallbackSourceIdProvider(mediaType),
+            )
+        } else {
+            val excludedIds = pluginStats.filter { it.key in excludedKeys }.mapTo(HashSet()) { it.representative }
+            // lastUsed/fallback исключённого плагина не должен просочиться в primary.
+            val lastUsedPlugin = pluginStats.firstOrNull { preferredSourceId in it.memberIds }
+            val effectiveLastUsed = if (lastUsedPlugin == null || lastUsedPlugin.key !in excludedKeys) {
+                preferredSourceId
+            } else {
+                -1L
+            }
+            val rawFallback = fallbackSourceIdProvider(mediaType)
+            val fallbackPlugin = pluginStats.firstOrNull { rawFallback in it.memberIds }
+            val effectiveFallback = when {
+                rawFallback <= 0 -> rawFallback
+                fallbackPlugin == null -> rawFallback
+                fallbackPlugin.key in excludedKeys -> -1L
+                else -> fallbackPlugin.representative
+            }
+            resolveSourceParticipation(
+                mode = preferences.discoverySourceMode(mediaType).get(),
+                excludedIds = excludedIds,
+                weightOrder = pluginStats.map { it.representative },
+                lastUsedId = effectiveLastUsed,
+                fallbackId = effectiveFallback,
+            )
+        }
+
+        val seedsWithTracks = seeds.map { seed ->
+            val trackTitles = runCatching { trackTitles(mediaType, seed.entryId) }.getOrDefault(emptyList())
+            if (trackTitles.isEmpty()) seed else seed.copy(altTitles = (seed.altTitles + trackTitles).distinct())
+        }
+
+        val useExternal = preferences.externalProvidersEnabled().get()
+        val disabledLikeProviders = buildSet {
+            if (!useExternal) {
+                addAll(listOf("AniList", "Shikimori", "MyAnimeList", "MangaUpdates", "NovelUpdates"))
+            } else {
+                if (!sourcePreferences.suggestionsUseShikimori().get()) add("Shikimori")
+                if (!sourcePreferences.suggestionsUseMangaUpdatesNovel().get()) add("MangaUpdates")
+                if (!sourcePreferences.suggestionsUseNovelUpdates().get()) add("NovelUpdates")
+            }
+        }
+        val cachedSuggestions = runCatching { repository.subscribe(mediaType).firstOrNull() }.getOrNull().orEmpty()
+        val currentSuggestions = cachedSuggestions.filterNot {
+            (it.rowType == DiscoveryRowType.LIKE && it.provider in disabledLikeProviders) ||
+                (
+                    !useExternal && it.rowType == DiscoveryRowType.TASTE &&
+                        ((it.sourceId ?: 0L) <= 0L || it.sourceUrl.isNullOrBlank())
+                    )
+        }
+        val existingRowItems = currentSuggestions
+            .groupBy { it.rowType }
+            .mapValues { (_, items) ->
+                items.map { suggestion ->
+                    DiscoveryRowItem(
+                        title = suggestion.title,
+                        cleanTitle = suggestion.cleanTitle,
+                        coverUrl = suggestion.coverUrl,
+                        reason = suggestion.reason,
+                        seedTitle = suggestion.seedTitle,
+                        provider = suggestion.provider,
+                        score = suggestion.score,
+                        sourceId = suggestion.sourceId,
+                        sourceUrl = suggestion.sourceUrl,
+                        genres = suggestion.genres,
+                    )
+                }
+            }
+        // Explicit opt-outs still apply when an incomplete replacement preserves the compatible cache.
+        val cachedLike = cachedSuggestions.filter { it.rowType == DiscoveryRowType.LIKE }
+        val currentLike = currentSuggestions.filter { it.rowType == DiscoveryRowType.LIKE }
+        if (preferences.rowLikeEnabled().get() && currentLike != cachedLike) {
+            repository.replaceRows(mediaType, DiscoveryRowType.LIKE, currentLike)
+        }
+        val cachedTaste = cachedSuggestions.filter { it.rowType == DiscoveryRowType.TASTE }
+        val currentTaste = currentSuggestions.filter { it.rowType == DiscoveryRowType.TASTE }
+        if (!useExternal && preferences.rowTasteEnabled().get() && currentTaste != cachedTaste) {
+            repository.replaceRows(mediaType, DiscoveryRowType.TASTE, currentTaste)
+        }
+        val shownCutoffMap = runCatching {
+            repository.getRecentExclusionsWithTimestamp(mediaType)
+        }.getOrDefault(emptyMap())
+        val shownTitles = shownCutoffMap.keys
+        val recentCleanTitles = if (isManualRefresh) {
+            currentSuggestions.mapTo(HashSet()) { it.cleanTitle } + shownTitles
+        } else {
+            shownTitles
+        }
+        val pageOffset = when {
+            isConfigurationRefresh -> 1
+            isManualRefresh -> manualPageOffset(candidateRefreshCount)
+            else -> backgroundPageOffset(candidateBackgroundCycle)
+        }
+
+        // Taste Learning Engine: fold сигнал-лога и слияние с библиотечным профилем.
+        // Плавный старт (blend) — при пустом логе merge возвращает библиотечный профиль как есть.
+        // Неявный негатив: тайтл показан ≥3 раз за 48ч без явного сигнала → жанры
+        // получают мягкий минус. Синтез на лету (не пишется в БД), явные сигналы важнее.
+        val libraryTasteProfile = buildTasteProfile(candidates)
+        val libraryProfileGenres = libraryTasteProfile.map { it.first }
+        val implicitNegatives = runCatching {
+            synthesizeImplicitNegatives(
+                shownWithCount = repository.getShownWithCount(mediaType),
+                explicitSignals = allSignals,
+                currentSuggestions = currentSuggestions,
+                mediaType = mediaType,
+                profileGenres = libraryProfileGenres,
+            )
+        }.getOrDefault(emptyList())
+        val learnedProfile = foldLearnedTasteProfile(signals = allSignals + implicitNegatives)
+        val mergedTasteProfile = mergeTasteProfiles(
+            libraryProfile = libraryTasteProfile,
+            learned = learnedProfile,
+        )
+        // «Просмотрено/прочитано»: нейтральное исключение — consumed-тайтлы не
+        // попадают в новые генерации ленты (вкусовой профиль они не трогают).
+        val consumedCleanTitles = allSignals
+            .filter { it.signalType.excludesFromFeed }
+            .mapTo(HashSet()) { it.cleanTitle }
+
+        val genreFilterSpec = preferences.genreFilterSpec()
+        // One budget for the whole media run: every row shares the deadline and
+        // the details allowance, so rows cannot multiply the worker cost.
+        // Genre-selected mode verifies deep pages of a few rich sources, so it
+        // gets a larger allowance; the deadline remains the real guard.
+        val verificationBudget = DiscoveryVerificationBudget(
+            budgetMs = mediaBudgetMs ?: DiscoveryVerificationBudget.DEFAULT_MEDIA_BUDGET_MS,
+            maxDetails = if (genreFilterSpec.requiredGenres.isNotEmpty()) {
+                DiscoveryVerificationBudget.DEFAULT_REQUIRED_MAX_DETAILS
+            } else {
+                DiscoveryVerificationBudget.DEFAULT_MAX_DETAILS
+            },
+        )
+        val baseContext = DiscoveryBuildContext(
+            mediaType = mediaType,
+            seeds = seedsWithTracks,
+            feedbackSeeds = feedbackSeeds,
+            libraryCleanTitles = candidates.mapTo(HashSet()) { normalizeDiscoveryTitle(it.title) },
+            historyCleanTitles = seedSources.historyCleanTitles(mediaType),
+            hiddenCleanTitles = repository.getHiddenTitles(mediaType) + consumedCleanTitles,
+            tasteProfile = mergedTasteProfile,
+            blacklistedTags = repository.getBlacklistedTags(mediaType),
+            ignoredGenres = genreFilterSpec.ignoredGenres,
+            // V1: статус-фильтр трендов — CSV из настроек, пусто = без фильтра.
+            releaseStatuses = DiscoveryReleaseStatus.parseCsv(preferences.releaseStatusFilter().get()),
+            // V3: жанровые фильтры — полная спецификация с режимами строгости и сопоставления.
+            priorityGenres = genreFilterSpec.priorityGenres,
+            requiredGenres = genreFilterSpec.requiredGenres,
+            genreFilterSpec = genreFilterSpec,
+            sourceId = participation.primarySourceId,
+            // C1 + участие плагинов: состав определяет resolveSourceParticipation
+            // (auto — топ-3 по весу библиотеки, manual — все выбранные).
+            sourceIds = participation.sourceIds,
+            sourceWeights = effectiveSourceWeights,
+            recentCleanTitles = recentCleanTitles,
+            shownCutoffMap = shownCutoffMap,
+            // Ручной рефреш: тайтлы текущей ленты не возвращаются stale-добором —
+            // наполнение ряда реально сменяется, а не «новые + всё старое».
+            currentFeedCleanTitles = if (isManualRefresh) {
+                currentSuggestions.mapTo(HashSet()) { it.cleanTitle }
+            } else {
+                emptySet()
+            },
+            existingRowItems = existingRowItems,
+            pageOffset = pageOffset,
+            verificationBudget = verificationBudget,
+        )
+        // TASTE and SOURCE otherwise run the same required-genre catalogue pass
+        // twice and then the coordinator dedupes one of them away. Share the
+        // pass and give the rows disjoint slices instead.
+        val requiredGenres = genreFilterSpec.requiredGenres
+        val sharedGenreQuery = if (
+            requiredGenres.isNotEmpty() &&
+            preferences.rowTasteEnabled().get() &&
+            preferences.rowSourceEnabled().get()
+        ) {
+            val ids = participation.sourceIds.filter { it > 0L }
+                .ifEmpty { listOf(participation.primarySourceId).filter { it > 0L } }
+            if (ids.isEmpty()) {
+                null
+            } else {
+                val rotation = (pageOffset - 1).coerceAtLeast(0) % ids.size
+                val ordered = ids.drop(rotation) + ids.take(rotation)
+                SharedRequiredGenreQuery {
+                    queryDiscoveryGenreSources(
+                        catalog = sourceCatalog,
+                        media = mediaType,
+                        sourceIds = ordered,
+                        genres = requiredGenres.toList(),
+                        page = pageOffset,
+                        releaseStatuses = baseContext.releaseStatuses,
+                        policy = baseContext.candidatePolicy,
+                        maxConcurrency = 4,
+                        timeoutMs = genreSourceTimeoutMs(
+                            verificationBudget,
+                            ordered.size,
+                            maxConcurrency = 4,
+                        ),
+                        hydrate = true,
+                        targetItems = RICH_SOURCE_TARGET * 2,
+                        perSourceCap = RICH_SOURCE_TARGET * 2,
+                        budget = verificationBudget,
+                    )
+                }
+            }
+        } else {
+            null
+        }
+        val context = if (sharedGenreQuery != null) {
+            baseContext.copy(sharedGenreQuery = sharedGenreQuery)
+        } else {
+            baseContext
+        }
+        logcat {
+            "[Discovery] refresh media=$mediaType manual=$isManualRefresh " +
+                "configuration=$isConfigurationRefresh page=$pageOffset " +
+                "statuses=${context.releaseStatuses} sources=${context.sourceIds} primary=${context.sourceId}"
+        }
+        // Выключенные в настройках ряды: чистим их записи в БД, чтобы UI не показывал «зомби».
+        // TREND — чисто внешний ряд; LIKE при выключенных внешних провайдерах строится из плагинов.
+        if (!preferences.rowLikeEnabled().get()) {
+            repository.replaceRows(mediaType, tachiyomi.domain.discovery.model.DiscoveryRowType.LIKE, emptyList())
+        }
+        if (!preferences.rowTasteEnabled().get()) {
+            repository.replaceRows(mediaType, tachiyomi.domain.discovery.model.DiscoveryRowType.TASTE, emptyList())
+        }
+        if (!preferences.rowTrendEnabled().get() || !useExternal) {
+            repository.replaceRows(mediaType, tachiyomi.domain.discovery.model.DiscoveryRowType.TREND, emptyList())
+        }
+        if (!preferences.rowSourceEnabled().get()) {
+            repository.replaceRows(mediaType, tachiyomi.domain.discovery.model.DiscoveryRowType.SOURCE, emptyList())
+        }
+        val builders = buildList {
+            if (preferences.rowLikeEnabled().get()) {
+                add(
+                    DiscoveryLikeRowBuilder(
+                        suggestionCoordinator = suggestionCoordinatorFactory(),
+                        catalog = sourceCatalog,
+                        includeExternal = useExternal,
+                    ),
+                )
+            }
+            if (preferences.rowTasteEnabled().get()) {
+                add(
+                    DiscoveryTasteRowBuilder(
+                        trending = trendingFactory(),
+                        catalog = sourceCatalog,
+                        // «Только плагины»: жанровые рекомендации строятся из каталогов,
+                        // внешние жанровые провайдеры не опрашиваются.
+                        includeExternal = useExternal,
+                        sortProvider = {
+                            if (preferences.trendSort().get() == "score") TrendSort.SCORE else TrendSort.POPULARITY
+                        },
+                    ),
+                )
+            }
+            if (preferences.rowTrendEnabled().get() && useExternal) {
+                add(
+                    DiscoveryTrendRowBuilder(
+                        trending = trendingFactory(),
+                        catalog = sourceCatalog,
+                        seasonProvider = {
+                            when (preferences.trendSeason().get()) {
+                                "next" -> TrendSeason.NEXT
+                                "both" -> TrendSeason.BOTH
+                                else -> TrendSeason.CURRENT
+                            }
+                        },
+                        sortProvider = {
+                            if (preferences.trendSort().get() == "score") TrendSort.SCORE else TrendSort.POPULARITY
+                        },
+                    ),
+                )
+            }
+            if (preferences.rowSourceEnabled().get()) {
+                add(DiscoverySourceRowBuilder(sourceCatalog, rowCap = 50))
+            }
+        }
+        if (builders.isEmpty()) {
+            failedRowsSink(mediaType, emptySet())
+            preferences.lastGenerationStatus(mediaType).set(DiscoveryRunStatus.SKIPPED.name)
+            preferences.lastGenerationAt(mediaType).set(System.currentTimeMillis())
+            return DiscoveryRunOutcome(
+                mediaType = mediaType,
+                status = DiscoveryRunStatus.SKIPPED,
+                attemptedRows = emptySet(),
+            )
+        }
+
+        val attemptedRows = builders.map { it.rowType }.toSet()
+        val persistedRows = mutableSetOf<DiscoveryRowType>()
+        val coordinator = coordinatorFactory(builders)
+        val feed = coordinator.streamFeed(context) { rowType, items ->
+            // Пустой ряд НЕ перезаписывает кэш: прежняя подборка живёт до следующего
+            // успешного непустого результата (защита от «всё пропало» при деградации провайдеров).
+            if (items.isEmpty()) {
+                logcat { "[DiscoveryRunner] $mediaType row $rowType empty — cache preserved" }
+                return@streamFeed
+            }
+            persistedRows += rowType
+            repository.replaceRows(
+                mediaType = mediaType,
+                rowType = rowType,
+                items = items.map { item ->
+                    DiscoverySuggestion(
+                        id = 0L,
+                        mediaType = mediaType,
+                        rowType = rowType,
+                        title = item.title,
+                        cleanTitle = item.cleanTitle,
+                        coverUrl = item.coverUrl,
+                        reason = item.reason,
+                        seedTitle = item.seedTitle,
+                        provider = item.provider,
+                        score = item.score,
+                        // Перезаписывается индексом списка внутри replaceRows.
+                        position = 0L,
+                        createdAt = System.currentTimeMillis(),
+                        sourceId = item.sourceId,
+                        sourceUrl = item.sourceUrl,
+                        genres = item.genres,
+                    )
+                },
+            )
+        }
+        val fillAudit = buildDiscoveryFillAudit(
+            mediaType = mediaType,
+            rawCandidates = feed.rawCandidates,
+            finalRows = feed.rows,
+            context = context,
+            detailsUsed = verificationBudget.detailsUsed,
+            detailsAllowance = verificationBudget.detailsAllowance,
+        )
+        logcat { fillAudit.logLine() }
+        logcat {
+            "[DiscoveryRunner] $mediaType done: rows=${feed.rows.mapValues { it.value.size }} failed=${feed.failedRows}"
+        }
+        // «Только плагины»: пустой TASTE-ряд (нет подходящих плагин-тайтлов) не должен
+        // оставлять в кэше внешние тайтлы — «пустой ряд не перезаписывает» здесь
+        // мешает явному выбору пользователя, чистим вручную. НО: упавший ряд (network)
+        // — не «честно пустой», его кэш не трогаем (feed.rows[T]=null при падении).
+        if (!useExternal && feed.isConclusiveEmpty(DiscoveryRowType.TASTE)) {
+            repository.replaceRows(mediaType, DiscoveryRowType.TASTE, emptyList())
+        }
+        // Статус-фильтр активен: пустой ряд (нет тайтлов выбранного статуса) не должен
+        // жить старым кэшем с НЕсоответствующими статусами — иначе «выбран Завершённый,
+        // а показывается всякое» из старой генерации. Чистим явно. НО: упавший ряд
+        // (провайдер/сеть отвалились) — не «честно пустой», его кэш сохраняем, иначе
+        // при отвале сети с включённым фильтром пропадала бы вся лента.
+        if (context.releaseStatuses.isNotEmpty() || context.requiredGenres.isNotEmpty()) {
+            tachiyomi.domain.discovery.model.DiscoveryRowType.entries.forEach { rowType ->
+                if (feed.isConclusiveEmpty(rowType)) {
+                    repository.replaceRows(mediaType, rowType, emptyList())
+                }
+            }
+        }
+        // Замороженные ряды: «честно пустой» LIKE при пустых сидах и TASTE при пустом профиле
+        // не должны вечно таскать кэш прошлых генераций.
+        if (feed.isConclusiveEmpty(DiscoveryRowType.LIKE) &&
+            context.seeds.isEmpty()
+        ) {
+            repository.replaceRows(mediaType, DiscoveryRowType.LIKE, emptyList())
+        }
+        if (feed.isConclusiveEmpty(DiscoveryRowType.TASTE) &&
+            context.tasteProfile.isEmpty() &&
+            context.requiredGenres.isEmpty() &&
+            context.priorityGenres.isEmpty()
+        ) {
+            repository.replaceRows(mediaType, DiscoveryRowType.TASTE, emptyList())
+        }
+
+        val actualExecutedRows = feed.rows.keys + feed.failedRows
+        val allExecutedFailed = actualExecutedRows.isNotEmpty() && feed.failedRows.containsAll(actualExecutedRows)
+        val hasPartialFailures = feed.failedRows.isNotEmpty() ||
+            feed.degradedRows.isNotEmpty() ||
+            (attemptedRows.isNotEmpty() && actualExecutedRows.size < attemptedRows.size)
+
+        val status = when {
+            allExecutedFailed -> DiscoveryRunStatus.FAILED
+            hasPartialFailures -> DiscoveryRunStatus.PARTIAL
+            else -> DiscoveryRunStatus.SUCCESS
+        }
+
+        if (actualExecutedRows.isNotEmpty() && !allExecutedFailed) {
+            if (isManualRefresh) {
+                preferences.manualRefreshCount(mediaType).set(candidateRefreshCount)
+            } else if (!isConfigurationRefresh) {
+                preferences.backgroundCycleCount(mediaType).set(candidateBackgroundCycle)
+            }
+        }
+        failedRowsSink(mediaType, feed.failedRows)
+        DiscoveryProgressTracker.update(
+            isRunning = true,
+            mediaType = mediaType,
+            stageText = "Готово",
+            current = builders.size,
+            total = builders.size,
+        )
+
+        preferences.lastGenerationStatus(mediaType).set(status.name)
+        preferences.lastGenerationAt(mediaType).set(System.currentTimeMillis())
+
+        return DiscoveryRunOutcome(
+            mediaType = mediaType,
+            status = status,
+            attemptedRows = attemptedRows,
+            failedRows = feed.failedRows,
+            degradedRows = feed.degradedRows,
+            persistedRows = persistedRows,
+        )
+    }
+}
+
+/**
+ * Статистика плагина для резолва участия: репрезентативный источник, суммарный вес
+ * библиотеки и Taste-аффинити из сигнал-лога (см. [applySourceAffinity]).
+ */
+private data class DiscoveryPluginStat(
+    val key: String,
+    val representative: Long,
+    val memberIds: Set<Long>,
+    val weight: Int,
+    val affinity: Double = 0.0,
+)
+
+/**
+ * Оффсет ротации сидов ручного рефреша: шаг 1 (свободный счётчик, без cap).
+ * Шаг 2 с предварительным % 20 посещал только половину позиций окна при чётных
+ * размерах пула и циклился на 20 — селектор сам приводится по distinct.size,
+ * шаг 1 гарантированно обходит все позиции при любом размере.
+ */
+internal fun manualSeedOffset(refreshCount: Int): Int = refreshCount
+
+/**
+ * Страница провайдеров/каталогов ручного рефреша: цикл 10 страниц (2..11).
+ * Цикл 4 полностью повторял выдачу уже к 5-му ручному рефрешу.
+ */
+internal fun manualPageOffset(refreshCount: Int): Int = ((refreshCount - 1) % 10) + 2
+
+/**
+ * Страница фонового цикла: 1..10, шагом по номеру цикла. Первый фон-прогон — страница 1
+ * (совпадает с прежним поведением), далее каждый цикл уходит глубже выдачи провайдера.
+ */
+internal fun backgroundPageOffset(cycleCount: Int): Int = ((cycleCount - 1).mod(10)) + 1

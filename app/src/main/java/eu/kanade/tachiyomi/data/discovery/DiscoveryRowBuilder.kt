@@ -1,1 +1,109 @@
-package eu.kanade.tachiyomi.data.discovery\n\nimport tachiyomi.domain.discovery.model.DiscoveryMediaType\nimport tachiyomi.domain.discovery.model.DiscoveryRowType\n\ndata class DiscoveryRowItem(\n    val title: String,\n    val cleanTitle: String,\n    val coverUrl: String?,\n    val reason: String?,\n    val seedTitle: String?,\n    val provider: String,\n    val score: Double,\n    val sourceId: Long? = null,\n    val sourceUrl: String? = null,\n    val genres: List<String> = emptyList(),\n    val altCleanTitles: List<String> = emptyList(),\n    /** Оценка провайдера в шкале 0..10; null — оценки нет. */\n    val rating: Double? = null,\n    /** Число серий; null — провайдер его не назвал. */\n    val episodes: Int? = null,\n    /** Статус выпуска в общем виде (ключ DiscoveryReleaseStatus); null — неизвестен. */\n    val status: String? = null,\n)\n\ndata class DiscoveryFeedbackSeed(\n    val title: String,\n    val cleanTitle: String,\n    val genres: List<String> = emptyList(),\n    val timestamp: Long = 0L,\n)\n\ndata class DiscoveryBuildContext(\n    val mediaType: DiscoveryMediaType,\n    val seeds: List<DiscoverySeedInput>,\n    val feedbackSeeds: List<DiscoveryFeedbackSeed> = emptyList(),\n    val libraryCleanTitles: Set<String>,\n    val historyCleanTitles: Set<String>,\n    val hiddenCleanTitles: Set<String>,\n    val tasteProfile: List<Pair<String, Double>> = emptyList(),\n    /** B2: теги из tag-blacklist — жанры профиля и айтемов с ними не проходят. */\n    val blacklistedTags: Set<String> = emptySet(),\n    /** V3: глобально игнорируемые жанры (преф). */\n    val ignoredGenres: Set<String> = emptySet(),\n    /** V1: статус-фильтр трендов (пусто = без фильтра, все статусы). */\n    val releaseStatuses: Set<tachiyomi.domain.discovery.model.DiscoveryReleaseStatus> = emptySet(),\n    /** V3: приоритетные жанры — буст скора, не отсекают. */\n    val priorityGenres: Set<String> = emptySet(),\n    /** V3: обязательные жанры — только тайтлы с ними (best-effort, пустой результат → без фильтра). */\n    val requiredGenres: Set<String> = emptySet(),\n    /** G01: полная спецификация жанровых фильтров. */\n    val genreFilterSpec: GenreFilterSpec = GenreFilterSpec(\n        ignoredGenres = ignoredGenres,\n        requiredGenres = requiredGenres,\n        priorityGenres = priorityGenres,\n    ),\n    val sourceId: Long = -1L,\n    /** C1: источники библиотеки, упорядоченные по весу (топ-3) — для ряда SOURCE. */\n    val sourceIds: List<Long> = emptyList(),\n    /** Эффективные веса источников (applySourceAffinity) для взвешенного распределения слотов в ряду SOURCE. */\n    val sourceWeights: Map<Long, Double> = emptyMap(),\n    val recentCleanTitles: Set<String> = emptySet(),\n    /** cleanTitle → таймстамп последнего показа (48h окно): порядок stale-добора в координаторе. */\n    val shownCutoffMap: Map<String, Long> = emptyMap(),\n    /** Тайтлы ТЕКУЩЕЙ ленты (ручной рефреш): stale-добор их не возвращает — наполнение реально сменяется. */\n    val currentFeedCleanTitles: Set<String> = emptySet(),\n    /**\n     * Already persisted compatible cards per row. A thin refresh merges them in\n     * first, so a partial source response cannot shrink the visible row.\n     */\n    val existingRowItems: Map<DiscoveryRowType, List<DiscoveryRowItem>> = emptyMap(),\n    val pageOffset: Int = 1,\n    /**\n     * Shared deadline and details allowance for this media run. Rows must not\n     * create their own budgets: TASTE and SOURCE consume the same one.\n     */\n    val verificationBudget: DiscoveryVerificationBudget? = null,\n    /**\n     * One required-genre source query shared by TASTE and SOURCE. Rows take\n     * disjoint slices of the same result: catalogue work is paid once and the\n     * coordinator's cross-row dedupe cannot empty SOURCE.\n     */\n    val sharedGenreQuery: SharedRequiredGenreQuery? = null,\n) {\n    val candidatePolicy: DiscoveryCandidatePolicy\n        get() {\n            val effectiveIgnored =\n                if (genreFilterSpec.ignoredGenres.isNotEmpty()) genreFilterSpec.ignoredGenres else ignoredGenres\n            val effectiveRequired =\n                if (genreFilterSpec.requiredGenres.isNotEmpty()) genreFilterSpec.requiredGenres else requiredGenres\n            val effectivePriority =\n                if (genreFilterSpec.priorityGenres.isNotEmpty()) genreFilterSpec.priorityGenres else priorityGenres\n            val effectiveSpec = genreFilterSpec.copy(\n                ignoredGenres = effectiveIgnored,\n                requiredGenres = effectiveRequired,\n                priorityGenres = effectivePriority,\n            )\n            return DiscoveryCandidatePolicy(\n                spec = effectiveSpec,\n                blacklistedTags = blacklistedTags,\n            )\n        }\n}\n\ninterface DiscoveryRowBuilder {\n    val rowType: DiscoveryRowType\n    val isDegraded: Boolean get() = false\n    suspend fun build(context: DiscoveryBuildContext): List<DiscoveryRowItem>\n}\n
+package eu.kanade.tachiyomi.data.discovery
+
+import tachiyomi.domain.discovery.model.DiscoveryMediaType
+import tachiyomi.domain.discovery.model.DiscoveryRowType
+
+data class DiscoveryRowItem(
+    val title: String,
+    val cleanTitle: String,
+    val coverUrl: String?,
+    val reason: String?,
+    val seedTitle: String?,
+    val provider: String,
+    val score: Double,
+    val sourceId: Long? = null,
+    val sourceUrl: String? = null,
+    val genres: List<String> = emptyList(),
+    val altCleanTitles: List<String> = emptyList(),
+    /** Оценка провайдера в шкале 0..10; null — оценки нет. */
+    val rating: Double? = null,
+    /** Число серий из того же ответа; null — провайдер его не назвал. */
+    val episodes: Int? = null,
+    /** Сырой статус провайдера; на карточке показывается общим ключом. */
+    val status: String? = null,
+)
+
+data class DiscoveryFeedbackSeed(
+    val title: String,
+    val cleanTitle: String,
+    val genres: List<String> = emptyList(),
+    val timestamp: Long = 0L,
+)
+
+data class DiscoveryBuildContext(
+    val mediaType: DiscoveryMediaType,
+    val seeds: List<DiscoverySeedInput>,
+    val feedbackSeeds: List<DiscoveryFeedbackSeed> = emptyList(),
+    val libraryCleanTitles: Set<String>,
+    val historyCleanTitles: Set<String>,
+    val hiddenCleanTitles: Set<String>,
+    val tasteProfile: List<Pair<String, Double>> = emptyList(),
+    /** B2: теги из tag-blacklist — жанры профиля и айтемов с ними не проходят. */
+    val blacklistedTags: Set<String> = emptySet(),
+    /** V3: глобально игнорируемые жанры (преф). */
+    val ignoredGenres: Set<String> = emptySet(),
+    /** V1: статус-фильтр трендов (пусто = без фильтра, все статусы). */
+    val releaseStatuses: Set<tachiyomi.domain.discovery.model.DiscoveryReleaseStatus> = emptySet(),
+    /** V3: приоритетные жанры — буст скора, не отсекают. */
+    val priorityGenres: Set<String> = emptySet(),
+    /** V3: обязательные жанры — только тайтлы с ними (best-effort, пустой результат → без фильтра). */
+    val requiredGenres: Set<String> = emptySet(),
+    /** G01: полная спецификация жанровых фильтров. */
+    val genreFilterSpec: GenreFilterSpec = GenreFilterSpec(
+        ignoredGenres = ignoredGenres,
+        requiredGenres = requiredGenres,
+        priorityGenres = priorityGenres,
+    ),
+    val sourceId: Long = -1L,
+    /** C1: источники библиотеки, упорядоченные по весу (топ-3) — для ряда SOURCE. */
+    val sourceIds: List<Long> = emptyList(),
+    /** Эффективные веса источников (applySourceAffinity) для взвешенного распределения слотов в ряду SOURCE. */
+    val sourceWeights: Map<Long, Double> = emptyMap(),
+    val recentCleanTitles: Set<String> = emptySet(),
+    /** cleanTitle → таймстамп последнего показа (48h окно): порядок stale-добора в координаторе. */
+    val shownCutoffMap: Map<String, Long> = emptyMap(),
+    /** Тайтлы ТЕКУЩЕЙ ленты (ручной рефреш): stale-добор их не возвращает — наполнение реально сменяется. */
+    val currentFeedCleanTitles: Set<String> = emptySet(),
+    /**
+     * Already persisted compatible cards per row. A thin refresh merges them in
+     * first, so a partial source response cannot shrink the visible row.
+     */
+    val existingRowItems: Map<DiscoveryRowType, List<DiscoveryRowItem>> = emptyMap(),
+    val pageOffset: Int = 1,
+    /**
+     * Shared deadline and details allowance for this media run. Rows must not
+     * create their own budgets: TASTE and SOURCE consume the same one.
+     */
+    val verificationBudget: DiscoveryVerificationBudget? = null,
+    /**
+     * One required-genre source query shared by TASTE and SOURCE. Rows take
+     * disjoint slices of the same result: catalogue work is paid once and the
+     * coordinator's cross-row dedupe cannot empty SOURCE.
+     */
+    val sharedGenreQuery: SharedRequiredGenreQuery? = null,
+) {
+    val candidatePolicy: DiscoveryCandidatePolicy
+        get() {
+            val effectiveIgnored =
+                if (genreFilterSpec.ignoredGenres.isNotEmpty()) genreFilterSpec.ignoredGenres else ignoredGenres
+            val effectiveRequired =
+                if (genreFilterSpec.requiredGenres.isNotEmpty()) genreFilterSpec.requiredGenres else requiredGenres
+            val effectivePriority =
+                if (genreFilterSpec.priorityGenres.isNotEmpty()) genreFilterSpec.priorityGenres else priorityGenres
+            val effectiveSpec = genreFilterSpec.copy(
+                ignoredGenres = effectiveIgnored,
+                requiredGenres = effectiveRequired,
+                priorityGenres = effectivePriority,
+            )
+            return DiscoveryCandidatePolicy(
+                spec = effectiveSpec,
+                blacklistedTags = blacklistedTags,
+            )
+        }
+}
+
+interface DiscoveryRowBuilder {
+    val rowType: DiscoveryRowType
+    val isDegraded: Boolean get() = false
+    suspend fun build(context: DiscoveryBuildContext): List<DiscoveryRowItem>
+}
