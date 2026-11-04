@@ -31,6 +31,8 @@ data class SiteSpec(
     val details: DetailsSpec = DetailsSpec(),
     val episodes: EpisodesSpec = EpisodesSpec(),
     val video: VideoSpec = VideoSpec(),
+    /** Фильтры источника: описаны в спеке, экран строит их без кода. */
+    val filters: List<FilterSpec> = emptyList(),
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
     /**
