@@ -1,9 +1,13 @@
 package eu.kanade.tachiyomi.takami
 
+import eu.kanade.tachiyomi.takami.video.Dubbing
+import eu.kanade.tachiyomi.takami.video.VideoStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Один шаг самопроверки: то же, что стенд делает на компьютере, только на телефоне. */
+/**
+ * Один шаг самопроверки: то же, что стенд делает на
+ * компьютере, только на телефоне. */
 data class CheckResult(
     val key: String,
     val title: String,
@@ -14,13 +18,21 @@ data class CheckResult(
 /**
  * Самопроверка источника сразу после сборки спеки.
  *
- * Проверяем только то, что зависит от спеки: каталог, вторая страница, карточка,
- * серии, медиа. Приложение, установку и прочие внешние вещи не трогаем.
+  * Проверяем только то, что зависит от спеки: каталог,
+  * вторая страница, карточка,
+  * серии, медиа. Приложение, установку и прочие внешние
+  * вещи не трогаем.
  */
 data class SelfCheckReport(
     val checks: List<CheckResult>,
     val dubbings: List<String> = emptyList(),
     val qualities: List<String> = emptyList(),
+    /**
+     * Найденные ссылки с двумя осями: экран показывает их
+     * как есть. */
+    val streams: List<VideoStream> = emptyList(),
+    /** Плеер, через который отдаётся видео; пусто — не определён. */
+    val hoster: String = "",
 )
 
 class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
@@ -31,6 +43,8 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
         val results = mutableListOf<CheckResult>()
         var dubbings: List<String> = emptyList()
         var qualities: List<String> = emptyList()
+        var streams: List<VideoStream> = emptyList()
+        var hoster = ""
 
         val (animes, hasNext) = runCatching { engine.catalogue(spec, 1) }
             .getOrElse {
@@ -67,7 +81,8 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
             )
         }
 
-        // Проверяем на нескольких тайтлах: у первого может не быть серий.
+        // Проверяем на нескольких тайтлах: у первого может
+        // не быть серий.
         var sample = animes.first()
         var details = runCatching { engine.details(spec, sample) }.getOrNull()
         var episodes = runCatching { engine.episodes(spec, sample) }.getOrNull().orEmpty()
@@ -105,13 +120,16 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
 
         val episode = episodes.firstOrNull()
         if (episode != null) {
-            val videos = runCatching { engine.videos(spec, episode) }.getOrNull().orEmpty()
-            qualities = videos.map { it.quality }.filter { it.isNotBlank() }.distinct()
-            val playable = videos.firstOrNull()
-            val media = playable != null && looksLikeMedia(engine.probe(playable.videoUrl, episode.url))
-            val videoOk = videos.isNotEmpty() && media
+            streams = runCatching { engine.streams(spec, episode) }.getOrNull().orEmpty()
+            qualities = streams.map { it.quality }.filter { it.isNotBlank() }.distinct()
+            // Озвучки берём из ссылок: в разметке они есть не всегда.
+            dubbings = Dubbing.names(streams.map { it.dubbing })
+            hoster = hosterOf(spec, streams)
+            val playable = streams.firstOrNull()
+            val media = playable != null && looksLikeMedia(engine.probe(playable.url, episode.url))
+            val videoOk = streams.isNotEmpty() && media
             if (!videoOk) {
-                val error = if (videos.isEmpty()) "no_links" else "no_video"
+                val error = if (streams.isEmpty()) "no_links" else "no_video"
                 ParseFailures.noteFailure(spec.host, "video", error, spec.version)
             }
             results += CheckResult(
@@ -119,17 +137,24 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
                 title = "Видео",
                 ok = videoOk,
                 note = when {
-                    videos.isEmpty() -> "ссылок нет"
+                    streams.isEmpty() -> "ссылок нет"
                     !media -> "ссылка не отдаёт поток"
-                    else -> videos.size.toString() + " ссылок"
+                    else -> streams.size.toString() + " ссылок"
                 },
             )
         }
 
-        dubbings = episodes.mapNotNull { ep -> ep.name.substringBefore(" (").takeIf { "(" in ep.name } }
-            .distinct()
+        SelfCheckReport(results, dubbings, qualities, streams, hoster)
+    }
 
-        SelfCheckReport(results, dubbings, qualities)
+    /** Плеер узнаём по адресу из спеки, иначе — по типу файла. */
+    private fun hosterOf(spec: SiteSpec, streams: List<VideoStream>): String {
+        val url = streams.firstOrNull()?.url.orEmpty()
+        if (url.isBlank()) return ""
+        val known = spec.video.hosters.firstOrNull { hoster ->
+            runCatching { Regex(hoster.urlPattern).containsMatchIn(url) }.getOrDefault(false)
+        }
+        return known?.name.orEmpty()
     }
 
     private fun looksLikeMedia(bytes: String): Boolean =

@@ -11,9 +11,12 @@ import org.jsoup.nodes.Element
 /**
  * Генератор: смотрит на живую страницу и собирает [SiteSpec].
  *
- * Порядок как у AniLabX-парсеров: сначала определяем движок по признакам в разметке,
- * потом подставляем проверенные для этого движка селекторы, потом — если движок
- * не опознан — перебираем варианты карточек и выбираем тот, что даёт больше всего
+  * Порядок как у AniLabX-парсеров: сначала определяем движок
+  * по признакам в разметке,
+  * потом подставляем проверенные для этого движка
+  * селекторы, потом — если движок
+  * не опознан — перебираем варианты карточек и выбираем
+  * тот, что даёт больше всего
  * ссылок с постерами.
  */
 class Forge(private val engine: SpecEngine = SpecEngine()) {
@@ -33,7 +36,8 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         }
         val doc = Jsoup.parse(html, url)
         val detected = detectEngine(html)
-        // Ни одного признака движка: селекторы подбираются наугад, и это
+        // Ни одного признака движка: селекторы подбираются
+        // наугад, и это
         // стоит видеть в калибровке наравне с провалом.
         if (detected == SiteSpec.ENGINE_GENERIC) {
             ParseFailures.noteFailure(host, "forge", "engine_unknown")
@@ -58,7 +62,8 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
 
         if (card == null) {
             ParseFailures.noteFailure(host, "catalog", "no_cards")
-            val reason = "Не нашёл карточки тайтлов на главной: сайт отдаёт разметку, " +
+            val reason = "Не нашёл карточки тайтлов на главной:" +
+                "сайт отдаёт разметку," +
                 "которую я пока не разбираю (проверил " + candidates.size + " вариантов)"
             return@withContext ForgeResult.Failure(reason)
         }
@@ -68,8 +73,10 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         val basePath = pathOf(url)
         val pagination = verifyPagination(baseUrl, basePath, paginationFor(detected, doc), sample.firstOrNull()?.url)
         val latestPath = findLatestFeed(baseUrl, basePath, detected, sample.firstOrNull()?.url)
-        // Первый тайтл каталога часто оказывается фильмом без серий.
-        // Смотрим несколько карточек и берём ту, где серии действительно есть.
+        // Первый тайтл каталога часто оказывается фильмом
+        // без серий.
+        // Смотрим несколько карточек и берём ту, где серии
+        // действительно есть.
         var detail = sample.firstOrNull()?.url ?: pickDetailPage(doc, url, chosen) ?: url
         var detailHtml = if (detail == url) html else runCatching { engine.fetch(detail) }.getOrDefault("")
         var detailDoc = Jsoup.parse(detailHtml, detail)
@@ -135,10 +142,23 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         }
 
         val report = SelfCheck(engine).report(spec)
-        ForgeResult.Built(spec, report.checks, detail, report.dubbings, report.qualities)
+        val withDubbings = spec.copy(
+            dubbingSpecs = report.dubbings.map { name -> DubbingSpec(name, ".dubbing") },
+        )
+        ForgeResult.Built(
+            spec = withDubbings,
+            checks = report.checks,
+            sampleDetailUrl = detail,
+            dubbings = report.dubbings,
+            qualities = report.qualities,
+            hoster = report.hoster,
+            streams = report.streams,
+        )
     }
 
-    /** Признаки движка прямо в разметке — то же, что делает AniLabX при разборе новых сайтов. */
+    /**
+     * Признаки движка прямо в разметке — то же, что делает
+     * AniLabX при разборе новых сайтов. */
     fun detectEngine(html: String): String = when {
         html.contains("/engine/classes/") || html.contains("engine/ajax") ||
             html.contains("dle_") || html.contains("DataLife Engine") -> SiteSpec.ENGINE_DLE
@@ -179,7 +199,9 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
             ?.takeIf { it.isNotBlank() }
     }
 
-    /** Путь каталога: если пользователь дал ссылку на раздел — работаем в нём. */
+    /**
+     * Путь каталога: если пользователь дал ссылку на
+     * раздел — работаем в нём. */
     private fun pathOf(url: String): String {
         val path = url.substringAfter("://").substringAfter('/', "")
         return "/" + path.trim('/') + if (path.isBlank()) "" else "/"
@@ -203,10 +225,13 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
     }
 
     /**
-     * Выбор карточки каталога: типовые контейнеры плюс догадка по повторяющимся блокам.
+      * Выбор карточки каталога: типовые контейнеры плюс
+      * догадка по повторяющимся блокам.
      *
-     * Каждый вариант проверяется разбором живой страницы: берём первый, где набирается
-     * достаточно тайтлов с заголовком и постером. Пустой результат — честный отказ,
+      * Каждый вариант проверяется разбором живой страницы:
+      * берём первый, где набирается
+      * достаточно тайтлов с заголовком и постером. Пустой
+      * результат — честный отказ,
      * а не пустой источник.
      */
     private fun reachableCards(doc: Document): List<CardChoice> {
@@ -269,7 +294,8 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
     )
 
     /**
-     * Проверяем пагинацию делом: если вторая страница не отличается,
+      * Проверяем пагинацию делом: если вторая страница не
+      * отличается,
      * значит сайт её не отдаёт — и обещать «есть ещё» нельзя.
      */
     private suspend fun verifyPagination(
@@ -289,7 +315,9 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
         return if (differs) pagination else PaginationSpec("none", "")
     }
 
-    /** Лента новинок: ищем раздел по годам, который реально отличается от главной. */
+    /**
+     * Лента новинок: ищем раздел по годам, который реально
+     * отличается от главной. */
     private suspend fun findLatestFeed(
         baseUrl: String,
         path: String,
@@ -325,7 +353,8 @@ class Forge(private val engine: SpecEngine = SpecEngine()) {
     }
 
     private fun pickEpisodes(doc: Document): EpisodeChoice {
-        // Плееры вроде «табов озвучки» держат адрес серии в атрибуте, а не в href.
+        // Плееры вроде «табов озвучки» держат адрес серии в
+        // атрибуте, а не в href.
         for (attr in EPISODE_ATTRS) {
             val nodes = doc.select("[" + attr + "]").filter { node ->
                 val text = node.text().trim()
@@ -424,6 +453,10 @@ sealed class ForgeResult {
         val sampleDetailUrl: String,
         val dubbings: List<String> = emptyList(),
         val qualities: List<String> = emptyList(),
+        /** Плеер, отдавший ссылки; пусто — не определён. */
+        val hoster: String = "",
+        /** Ссылки с двумя осями: качество и озвучка отдельно. */
+        val streams: List<VideoStream> = emptyList(),
     ) : ForgeResult()
     data class Failure(val reason: String) : ForgeResult()
 }

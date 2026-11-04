@@ -5,6 +5,12 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.takami.fetch.FetchedPage
 import eu.kanade.tachiyomi.takami.fetch.Fetcher
+import eu.kanade.tachiyomi.takami.video.Dubbing
+import eu.kanade.tachiyomi.takami.video.HlsMaster
+import eu.kanade.tachiyomi.takami.video.PlayerMap
+import eu.kanade.tachiyomi.takami.video.Quality
+import eu.kanade.tachiyomi.takami.video.QualityLink
+import eu.kanade.tachiyomi.takami.video.VideoStream
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import org.jsoup.Jsoup
@@ -14,10 +20,13 @@ import java.io.IOException
 import java.net.URLEncoder
 
 /**
- * Исполнитель спеки: превращает [SiteSpec] в каталог, карточку, серии и видео.
+  * Исполнитель спеки: превращает [SiteSpec] в каталог,
+  * карточку, серии и видео.
  *
- * Ничего не знает про конкретные сайты — только про то, как читать селекторы.
- * Это и есть аналог парсеров AniLabX, но без сборки APK: спека лежит в filesDir.
+  * Ничего не знает про конкретные сайты — только про то,
+  * как читать селекторы.
+  * Это и есть аналог парсеров AniLabX, но без сборки APK: спека
+  * лежит в filesDir.
  */
 class SpecEngine(
     private val fetcherOverride: Fetcher? = null,
@@ -112,7 +121,8 @@ class SpecEngine(
             initialized = true
         }
 
-        // Ни названия, ни постера: карточка открылась, но разбирать нечего.
+        // Ни названия, ни постера: карточка открылась, но
+        // разбирать нечего.
         if (result.title.isBlank() && result.thumbnail_url.isNullOrBlank()) {
             ParseFailures.noteFailure(spec.host, "details", "empty_body", spec.version)
         }
@@ -147,14 +157,18 @@ class SpecEngine(
                 if (href.isBlank()) return@mapIndexedNotNull null
 
                 val label = item.text().trim().ifBlank { link.text().trim() }
-                // Без явной привязки к сериям берём только похожие подписи:
-                // иначе в список попадают годы, жанры и прочие ссылки с цифрами.
+                // Без явной привязки к сериям берём только
+                // похожие подписи:
+                // иначе в список попадают годы, жанры и прочие
+                // ссылки с цифрами.
                 if (e.linkAttr == "href" && !EPISODE_HINT.containsMatchIn(label)) return@mapIndexedNotNull null
 
                 if (label.contains("фильм", true)) return@mapIndexedNotNull null
 
-                // У блоков плеера подпись часто — название озвучки без номера.
-                // Тогда номер берём по порядку, а подпись оставляем человеческой.
+                // У блоков плеера подпись часто — название
+                // озвучки без номера.
+                // Тогда номер берём по порядку, а подпись
+                // оставляем человеческой.
                 val number = numberRegex.find(label)?.groupValues?.last()?.toFloatOrNull()
                     ?: if (e.linkAttr != "href") (index + 1).toFloat() else return@mapIndexedNotNull null
 
@@ -183,67 +197,180 @@ class SpecEngine(
         return parsed
     }
 
-    suspend fun videos(spec: SiteSpec, episode: SEpisode): List<Video> {
-        val first = fetchPage(episode.url)
-        val links = linkedMapOf<String, String>()
-        val labelled = Regex(spec.video.labelRegex)
+    /** Ссылки для запуска серии: качество отдельной подписью. */
+    suspend fun videos(spec: SiteSpec, episode: SEpisode, dubbing: String? = null): List<Video> =
+        streams(spec, episode, dubbing).map { stream ->
+            Video(stream.url, Quality.text(stream.quality), stream.url)
+        }
 
-        fun collect(html: String) {
-            labelled.findAll(html).forEach { match ->
-                val label = match.groupValues[1].trim()
-                val url = normalizeMedia(match.groupValues[2])
-                if (url.isNotBlank()) links.putIfAbsent(url, label)
-            }
-            MEDIA_URL.findAll(html).forEach { match ->
-                val url = normalizeMedia(match.value)
-                if (url.isNotBlank()) links.putIfAbsent(url, qualityOf(url))
-            }
-            // playerjs и родственные: адрес, затем метка — «...mp4,[360p]».
-            REVERSED.findAll(html).forEach { match ->
-                val url = normalizeMedia(match.groupValues[1])
-                val label = match.groupValues[2].trim()
-                if (url.isNotBlank() && label.isNotBlank()) links.putIfAbsent(url, label)
-            }
-            // Часть плееров кладёт адрес в атрибут, а не в текст скрипта.
-            val doc = Jsoup.parse(html)
-            doc.select("video[src], source[src], video[data-src], source[data-src]").forEach { node ->
-                val raw = node.attr("src").ifBlank { node.attr("data-src") }
-                val url = normalizeMedia(raw)
-                if (url.isNotBlank()) links.putIfAbsent(url, qualityOf(url))
+    /**
+     * Ссылки с двумя осями: озвучка и качество считаются отдельно.
+     *
+      * Явная озвучка оставляет только её дорожки, без неё в
+      * список попадают
+      * все доступные, каждая со своим именем. Мастер HLS
+      * читается один раз на
+     * серию: сегменты не запрашиваются никогда.
+     */
+    suspend fun streams(spec: SiteSpec, episode: SEpisode, dubbing: String? = null): List<VideoStream> {
+        val page = fetchPage(episode.url)
+        val tracks = tracksOf(spec, page.html, page.url)
+        val found = if (tracks.isEmpty()) {
+            collectAll(spec, page.html, page.url, "")
+        } else {
+            tracks.flatMap { track -> collectAll(spec, track.html, page.url, track.name) }
+        }
+        val expanded = expandMaster(spec, found, episode.url)
+        val chosen = when {
+            dubbing.isNullOrBlank() -> expanded
+            dubbing == Dubbing.NONE -> expanded.filter { it.dubbing.isBlank() }
+            else -> expanded.filter { it.dubbing.equals(dubbing, ignoreCase = true) }
+        }
+        return Quality.arrange(chosen, spec.video.preferred).map { VideoStream.of(it) }
+    }
+
+    /**
+     * Одна дорожка плеера: название и кусок разметки со
+     * ссылками. */
+    private data class Track(val name: String, val html: String)
+
+    /**
+     * Озвучки страницы: табы плеера и блоки из спеки.
+     *
+      * Таб — это ссылка на якорь и блок с тем же id: внутри
+      * блока и лежат
+     * ссылки своей озвучки. Блок без ссылок в список не попадает.
+     */
+    private fun tracksOf(spec: SiteSpec, html: String, pageUrl: String): List<Track> {
+        if (spec.video.dubbingMode == "none") return emptyList()
+        val doc = Jsoup.parse(html, pageUrl)
+        val found = mutableListOf<DubbingTrack to String>()
+
+        for (item in spec.dubbingSpecs) {
+            val block = runCatching { doc.selectFirst(item.selector) }.getOrNull() ?: continue
+            if (hasLinks(block)) found += DubbingTrack(item.name) to block.html()
+        }
+
+        if (found.isEmpty() && spec.video.dubbingMode != "labels") {
+            doc.select("a[href^=#]").forEach { anchor ->
+                val id = anchor.attr("href").removePrefix("#")
+                if (id.isBlank()) return@forEach
+                val block = doc.getElementById(id) ?: return@forEach
+                if (!hasLinks(block)) return@forEach
+                found += DubbingTrack(anchor.text()) to block.html()
             }
         }
 
-        collect(first.html)
+        val unique = linkedMapOf<String, Track>()
+        Dubbing.tracks(found.map { it.first }).forEach { track ->
+            val markup = found.firstOrNull { it.first.name.equals(track.name, true) }?.second.orEmpty()
+            unique[track.name.lowercase()] = Track(track.name, markup)
+        }
+        return unique.values.toList()
+    }
 
-        // Плеер-обёртка: видео лежит на следующем уровне iframe.
-        var html = first.html
+    private fun hasLinks(block: Element): Boolean =
+        block.select("a[href], [data-iframe], [data-src], iframe, video, source").isNotEmpty()
+
+    /**
+     * Ссылки со страницы; если их нет — спускаемся по
+     * вложенным плеерам. */
+    private suspend fun collectAll(
+        spec: SiteSpec,
+        html: String,
+        pageUrl: String,
+        track: String,
+    ): List<QualityLink> {
+        val direct = collectLinks(spec, html, pageUrl, track)
+        if (direct.isNotEmpty()) return direct
+
+        val collected = mutableListOf<QualityLink>()
+        var page = html
         var depth = 0
-        while (links.isEmpty() && depth < spec.video.iframeDepth) {
-            val doc = Jsoup.parse(html, episode.url)
+        while (depth < spec.video.iframeDepth) {
+            val doc = Jsoup.parse(page, pageUrl)
             val iframe = spec.video.iframeSelector
                 ?.let { doc.selectFirst(it) }
                 ?: doc.selectFirst("iframe[src], iframe[data-src]")
                 ?: break
             val src = iframe.absUrl("src").ifBlank { iframe.absUrl("data-src") }
             if (src.isBlank()) break
-            html = fetch(src, referer = episode.url)
-            collect(html)
+            page = runCatching { fetch(src, referer = pageUrl) }.getOrNull() ?: break
+            collected += collectLinks(spec, page, src, track)
+            if (collected.isNotEmpty()) break
             depth++
         }
+        return Quality.dedupe(collected)
+    }
 
-        val videos = links.map { (url, label) ->
-            val quality = normalizeQuality(label).ifBlank { qualityOf(url) }
-            Video(url, quality, url)
+    /**
+     * Пары «метка + адрес» и карта плеера; качество берём из
+     * метки. */
+    private fun collectLinks(
+        spec: SiteSpec,
+        html: String,
+        pageUrl: String,
+        track: String,
+    ): List<QualityLink> {
+        val result = mutableListOf<QualityLink>()
+        val labelled = Regex(spec.video.labelRegex)
+        labelled.findAll(html).forEach { match ->
+            val url = normalizeMedia(match.groupValues[2])
+            if (url.isNotBlank()) {
+                result += QualityLink(url, track, Quality.normalize(match.groupValues[1]), "label")
+            }
         }
+        // playerjs и родственные: адрес, затем метка — «...mp4,[360p]».
+        REVERSED.findAll(html).forEach { match ->
+            val url = normalizeMedia(match.groupValues[1])
+            if (url.isNotBlank()) {
+                result += QualityLink(url, track, Quality.normalize(match.groupValues[2]), "map")
+            }
+        }
+        // Карта плеера: file: "[360p]...", file: { "720": "..." }.
+        FILE_FIELD.findAll(html).forEach { match ->
+            result += PlayerMap.parse(match.groupValues[1], track)
+        }
+        MEDIA_URL.findAll(html).forEach { match ->
+            val url = normalizeMedia(match.value)
+            if (url.isNotBlank() && result.none { it.url == url }) {
+                result += QualityLink(url, track, Quality.normalize(match.value), "url")
+            }
+        }
+        val doc = Jsoup.parse(html, pageUrl)
+        doc.select("video[src], source[src], video[data-src], source[data-src]").forEach { node ->
+            val raw = node.attr("src").ifBlank { node.attr("data-src") }
+            val url = normalizeMedia(raw)
+            if (url.isNotBlank() && result.none { it.url == url }) {
+                result += QualityLink(url, track, Quality.normalize(node.attr("label")), "url")
+            }
+        }
+        return Quality.dedupe(result)
+    }
 
-        if (videos.isEmpty()) {
-            ParseFailures.noteFailure(spec.host, "video", "no_links", spec.version)
+    /**
+     * Мастер HLS читаем один раз на серию: из него выходят
+     * все качества. */
+    private suspend fun expandMaster(
+        spec: SiteSpec,
+        links: List<QualityLink>,
+        referer: String,
+    ): List<QualityLink> {
+        if (!spec.video.hlsMaster) return links
+        val cache = mutableMapOf<String, List<QualityLink>>()
+        val result = mutableListOf<QualityLink>()
+        for (link in links) {
+            if (!link.url.contains(".m3u8", ignoreCase = true)) {
+                result += link
+                continue
+            }
+            val variants = cache.getOrPut(link.url) {
+                val text = runCatching { fetch(link.url, referer = referer) }.getOrNull()
+                text?.let { HlsMaster.parse(it, link.dubbing) }.orEmpty()
+            }
+            if (variants.isEmpty()) result += link else result += variants
         }
-
-        return when (spec.qualityPreference) {
-            "max" -> videos.sortedByDescending { qualityRank(it.quality) }
-            else -> videos
-        }
+        return result
     }
 
     /** Название озвучки: таб плеера, внутри которого лежит серия. */
@@ -260,26 +387,9 @@ class SpecEngine(
         return null
     }
 
-    /** «HD» → 720p, «SD» → 480p, «720» → 720p. */
-    private fun normalizeQuality(label: String): String {
-        val clean = label.trim()
-        if (clean.isBlank()) return ""
-        val digits = QUALITY.find(clean)?.groupValues?.get(1)?.toIntOrNull()
-            ?: DIGITS.find(clean)?.value?.toIntOrNull()
-        if (digits != null && digits in 144..2160) return digits.toString() + "p"
-        return when (clean.uppercase()) {
-            "HD" -> "720p"
-            "FHD" -> "1080p"
-            "SD" -> "480p"
-            "LQ" -> "360p"
-            else -> clean
-        }
-    }
-
-    private fun qualityRank(quality: String): Int =
-        DIGITS.find(quality)?.value?.toIntOrNull() ?: 0
-
-    /** Протокол-относительные адреса плееров и разметки приводим к https. */
+    /**
+     * Протокол-относительные адреса плееров и разметки
+     * приводим к https. */
     private fun normalizeMedia(raw: String): String {
         val url = raw.replace("&amp;", "&").trim().trimEnd(',', '"', '\'')
         return when {
@@ -309,20 +419,24 @@ class SpecEngine(
         }
     }
 
-    /** Все запросы идут через [Fetcher]: лимиты, кэш и повторы живут там. */
+    /**
+     * Все запросы идут через [Fetcher]: лимиты, кэш и повторы
+     * живут там. */
     suspend fun fetch(url: String, referer: String? = null): String = fetcher.get(url, referer)
 
     /**
      * Страница вместе с конечным адресом после редиректов.
      *
-     * Относительные ссылки нужно считать от него: иначе карточки каталога ведут
+      * Относительные ссылки нужно считать от него: иначе
+      * карточки каталога ведут
      * в несуществующие пути, а вёрстка выглядит «сломанной».
      */
     internal suspend fun fetchPage(url: String, referer: String? = null): FetchedPage =
         fetcher.page(url, referer)
 
     /**
-     * Первые байты медиа: проверяем, что ссылка отдаёт поток, а не страницу.
+      * Первые байты медиа: проверяем, что ссылка отдаёт
+      * поток, а не страницу.
      * Трафик минимальный — Range 0..256.
      */
     suspend fun probe(url: String, referer: String? = null): String = try {
@@ -355,11 +469,6 @@ class SpecEngine(
         else -> SAnime.UNKNOWN
     }
 
-    private fun qualityOf(url: String): String {
-        QUALITY.find(url)?.let { return it.groupValues[1] + "p" }
-        return "Видео"
-    }
-
     companion object {
         private val MEDIA_URL = Regex(
             """(?:https?:)?//[^\s"'<>]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"'<>]*)?""",
@@ -374,5 +483,10 @@ class SpecEngine(
             """((?:https?:)?//[^\s"'<>,\[\]]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"'<>,\[\]]*)?)\s*,\s*\[([^\]]{1,12})]""",
         )
         private val PAGE_NUMBER = Regex("""(?:page[/=])(\d+)""")
+
+        private val FILE_FIELD = Regex(
+            """(?:^|[^A-Za-z])file\s*[:=]\s*(\[[^\]]*]|\{[^}]*}|"[^"]*"|'[^']*')""",
+            RegexOption.IGNORE_CASE,
+        )
     }
 }
