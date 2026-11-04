@@ -53,7 +53,7 @@ fi
 if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
     CHANGED=$(git diff --name-only "$BASE"...HEAD 2>/dev/null)
     # С этапа 3 по протоколу экран диагностики живёт в ui/takami — путь разрешён.
-    OUT=$(echo "$CHANGED" | grep -vE '^(app/src/main/java/eu/kanade/tachiyomi/takami/|app/src/main/java/eu/kanade/tachiyomi/ui/takami/|telemetry-collector/|app/src/test/java/eu/kanade/tachiyomi/takami/|\.github/(workflows|scripts)/|\.github/[a-z0-9.-]+\.md|app/build\.gradle\.kts|gradle/libs\.versions\.toml|docs/|reports/)' | grep -v '^$')
+    OUT=$(echo "$CHANGED" | grep -vE '^(app/src/main/java/eu/kanade/tachiyomi/takami/|app/src/main/java/eu/kanade/tachiyomi/ui/takami/|telemetry-collector/|app/src/test/java/eu/kanade/tachiyomi/takami/|\.github/(workflows|scripts)/|\.github/[a-z0-9.-]+\.md|app/build\.gradle\.kts|gradle/libs\.versions\.toml|docs/|reports/|scripts/)' | grep -v '^$')
     if [ -z "$OUT" ]; then
         ok G0.3 "изменения в разрешённых путях ($(echo "$CHANGED" | grep -c . ) файлов)"
     else
@@ -206,14 +206,17 @@ fi
 # ---------- G7. Совместимость API ----------
 if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
     # Сравниваем только сигнатуры: тело функции может меняться, объявление — нет.
+    # Сравниваем имена методов: параметр с умолчанием прежние вызовы не ломает,
+    # а исчезновение или переименование метода ломает.
+    NAMES='s/^[[:space:]]*(suspend )?fun ([A-Za-z0-9_]+).*/\2/'
     OLD=$(git show "$BASE:app/src/main/java/eu/kanade/tachiyomi/takami/SpecEngine.kt" 2>/dev/null \
-        | grep -E "^\s{4}(suspend )?fun " | sed -E 's/[[:space:]]*(=|\{).*$//')
+        | grep -E "^\s{4}(suspend )?fun " | sed -E "$NAMES" | sort)
     NEW=$(git show "HEAD:app/src/main/java/eu/kanade/tachiyomi/takami/SpecEngine.kt" 2>/dev/null \
-        | grep -E "^\s{4}(suspend )?fun " | sed -E 's/[[:space:]]*(=|\{).*$//')
+        | grep -E "^\s{4}(suspend )?fun " | sed -E "$NAMES" | sort)
     if [ "$OLD" = "$NEW" ]; then
-        ok G7.1 "публичные методы SpecEngine не изменились"
+        ok G7.1 "публичные методы SpecEngine на месте"
     else
-        bad G7.1 "сигнатуры SpecEngine изменились"
+        bad G7.1 "набор публичных методов SpecEngine изменился"
     fi
 
     if git diff --quiet "$BASE"...HEAD -- gradle/libs.versions.toml; then

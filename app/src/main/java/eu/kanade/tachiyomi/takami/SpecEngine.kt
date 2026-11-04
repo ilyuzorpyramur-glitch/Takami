@@ -245,7 +245,7 @@ class SpecEngine(
     private fun tracksOf(spec: SiteSpec, html: String, pageUrl: String): List<Track> {
         if (spec.video.dubbingMode == "none") return emptyList()
         val doc = Jsoup.parse(html, pageUrl)
-        val found = mutableListOf<DubbingTrack to String>()
+        val found = mutableListOf<Pair<DubbingTrack, String>>()
 
         for (item in spec.dubbingSpecs) {
             val block = runCatching { doc.selectFirst(item.selector) }.getOrNull() ?: continue
