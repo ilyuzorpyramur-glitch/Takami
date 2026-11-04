@@ -79,6 +79,7 @@ import eu.kanade.tachiyomi.ui.browse.novel.source.browse.BrowseNovelSourceScreen
 import eu.kanade.tachiyomi.ui.browse.novel.source.globalsearch.GlobalNovelSearchScreen
 import eu.kanade.tachiyomi.ui.discovery.DiscoveryDirectOpenResolver
 import eu.kanade.tachiyomi.ui.discovery.DiscoveryFeedScreen
+import eu.kanade.tachiyomi.ui.discovery.SwipeDiscoveryScreen
 import eu.kanade.tachiyomi.ui.discovery.DiscoveryPreviewSheet
 import eu.kanade.tachiyomi.ui.entries.anime.AnimeScreen
 import eu.kanade.tachiyomi.ui.entries.manga.MangaScreen
@@ -917,6 +918,16 @@ private fun HomeHubScreen(
                             else -> HeroSectionPlaceholder()
                         }
                     }
+                }
+
+                item(key = "home_swipe_entry", contentType = "home_hub_swipe_entry") {
+                    HomeSwipeEntryCard(
+                        onClick = {
+                            navigator.push(
+                                SwipeDiscoveryScreen(section.toDiscoveryMediaType().key),
+                            )
+                        },
+                    )
                 }
 
                 item(key = "home_search_bar", contentType = "home_hub_search_bar") {
