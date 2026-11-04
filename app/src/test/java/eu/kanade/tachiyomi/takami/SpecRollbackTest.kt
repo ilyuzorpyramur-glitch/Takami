@@ -87,4 +87,33 @@ class SpecRollbackTest {
         entries.size shouldBe 1
         entries.first().reason.contains("1 из 4") shouldBe true
     }
+
+    @Test
+    fun `лечение сравнивает с живым состоянием, а не с прошлой записью`() {
+        val journal = SpecJournal(dir)
+        val previous = spec(4)
+        val candidate = spec(3)
+
+        // Прошлая запись знала четыре проверки, но перед лечением источник
+        // проходил две: запомненное число устарело, и откат к нему вернул бы
+        // сломанную спеку.
+        val decision = SpecRollback.apply(previous, candidate, listOf("Видео"), journal, baseline = 2)
+
+        decision.rolledBack shouldBe false
+        decision.spec.checksPassed shouldBe 3
+        journal.entries().size shouldBe 0
+    }
+
+    @Test
+    fun `лечение без улучшения откатывается по живому состоянию`() {
+        val journal = SpecJournal(dir)
+
+        val decision = SpecRollback.apply(spec(4), spec(2), listOf("Видео"), journal, baseline = 3)
+
+        decision.rolledBack shouldBe true
+        decision.spec.checksPassed shouldBe 4
+        val entries = journal.entries("site.example")
+        entries.size shouldBe 1
+        entries.first().reason.contains("2 из 3") shouldBe true
+    }
 }

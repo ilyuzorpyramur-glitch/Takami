@@ -163,7 +163,31 @@ class Healer(
         }
 
         val failedAfter = after.checks.filterNot { it.ok }.map { it.key }
-        TakamiForge.save(merged.copy(checksPassed = after.checks.count { it.ok }), failedAfter)
+        // Сравниваем с живым состоянием до правки: прошлая запись могла быть
+        // сломана сильнее, и откат к ней убил бы только что найденную починку.
+        val saved = TakamiForge.save(
+            merged.copy(checksPassed = after.checks.count { it.ok }),
+            failedAfter,
+            baseline = before.checks.count { it.ok },
+        )
+        if (!sameSource(saved, merged)) {
+            // Запись не удержалась: говорим об этом прямо, а не «починено».
+            HealLog.write(
+                HealLogEntry(
+                    host = spec.host,
+                    part = part.name,
+                    attempt = state.attemptsToday + 1,
+                    decision = "rejected",
+                    reason = "rolled_back",
+                    before = marks(before.checks),
+                    after = marks(after.checks),
+                    trigger = trigger,
+                    at = now,
+                ),
+            )
+            ParseFailures.noteFailure(spec.host, "heal", "rolled_back", spec.version)
+            return HealResult(false, part, "rolled_back", before.checks, after.checks)
+        }
         HealLog.write(
             HealLogEntry(
                 host = spec.host,
@@ -179,6 +203,11 @@ class Healer(
         )
         return HealResult(true, part, "", before.checks, after.checks)
     }
+
+    /** Совпадает ли записанная спека с той, что мы собрали (без меток времени). */
+    private fun sameSource(saved: SiteSpec, merged: SiteSpec): Boolean =
+        saved.copy(createdAt = 0L, updatedAt = 0L, checksPassed = 0) ==
+            merged.copy(createdAt = 0L, updatedAt = 0L, checksPassed = 0)
 
     /** Плюс-минус по шагам: «catalog+;details-;episodes-». */
     private fun marks(checks: List<CheckResult>): String = checks.joinToString(";") { it.key + mark(it.ok) }

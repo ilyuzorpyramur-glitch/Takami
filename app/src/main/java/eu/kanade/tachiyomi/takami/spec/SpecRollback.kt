@@ -83,11 +83,17 @@ object SpecRollback {
         failedChecks: List<String> = emptyList(),
         journal: SpecJournal? = null,
         now: Long = System.currentTimeMillis(),
+        baseline: Int? = null,
     ): RollbackDecision {
         if (previous == null) return RollbackDecision(candidate, false)
-        if (candidate.checksPassed >= previous.checksPassed) return RollbackDecision(candidate, false)
+        // С чем сравнивать: с числом проверок прошлой записи или с тем, что
+        // источник проходит прямо сейчас. Лечение сравнивает с живым
+        // состоянием: прошлая запись могла устареть, и откат к ней вернул бы
+        // заведомо сломанную спеку.
+        val reference = baseline ?: previous.checksPassed
+        if (candidate.checksPassed >= reference) return RollbackDecision(candidate, false)
 
-        val reason = reasonOf(previous, candidate, failedChecks)
+        val reason = reasonOf(reference, candidate, failedChecks)
         journal?.write(
             SpecJournalEntry(
                 host = candidate.host,
@@ -103,8 +109,8 @@ object SpecRollback {
         return RollbackDecision(previous, true, reason)
     }
 
-    private fun reasonOf(previous: SiteSpec, candidate: SiteSpec, failedChecks: List<String>): String {
-        val counts = "пройдено " + candidate.checksPassed + " из " + previous.checksPassed + " проверок"
+    private fun reasonOf(reference: Int, candidate: SiteSpec, failedChecks: List<String>): String {
+        val counts = "пройдено " + candidate.checksPassed + " из " + reference + " проверок"
         if (failedChecks.isEmpty()) return "деградация: " + counts
         return "деградация: " + counts + ", упали: " + failedChecks.joinToString(", ")
     }

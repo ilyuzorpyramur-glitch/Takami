@@ -252,7 +252,12 @@ object TakamiForge {
       * журнал: пользователь ничего не замечает, источник
       * просто продолжает работать.
      */
-    suspend fun save(spec: SiteSpec, failedChecks: List<String> = emptyList()): SiteSpec =
+    suspend fun save(
+        spec: SiteSpec,
+        failedChecks: List<String> = emptyList(),
+        /** С каким числом пройденных проверок сравнивать откат; null — с прошлой записью. */
+        baseline: Int? = null,
+    ): SiteSpec =
         withContext(Dispatchers.IO) {
             val history = SpecHistory(dir)
             val candidate = spec.stamped()
@@ -261,7 +266,7 @@ object TakamiForge {
             // сравнить можно только с тем,
             // что уже записано.
             history.record(candidate)
-            val decision = SpecRollback.apply(previous, candidate, failedChecks, SpecJournal(dir))
+            val decision = SpecRollback.apply(previous, candidate, failedChecks, SpecJournal(dir), baseline = baseline)
             val accepted = if (decision.rolledBack) {
                 // Откат: снимаем неудачную версию и возвращаем прошлую.
                 history.rollback(candidate.host)
