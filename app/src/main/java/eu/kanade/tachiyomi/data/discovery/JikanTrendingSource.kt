@@ -62,6 +62,12 @@ internal fun parseJikanAnimePage(
                 provider = "jikan_trend",
                 // V1: сырой MAL-статус («Currently Airing»/«Finished Airing»/…) — для пост-фильтра.
                 releaseStatus = runCatching { item["status"]?.jsonPrimitive?.contentOrNull }.getOrNull(),
+                rating = RatingScale.fromTen(
+                    runCatching { item["score"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() }.getOrNull(),
+                ),
+                episodes = runCatching {
+                    item["episodes"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                }.getOrNull()?.takeIf { it > 0 },
             )
         }.orEmpty()
 

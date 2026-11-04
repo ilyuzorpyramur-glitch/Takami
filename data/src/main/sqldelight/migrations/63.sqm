@@ -1,0 +1,5 @@
+-- Migration 63: карточке свайпа нужны оценка, число серий и статус выпуска.
+-- Все три колонки необязательные: у старых строк значения останутся пустыми.
+ALTER TABLE discovery_suggestions ADD COLUMN rating REAL;
+ALTER TABLE discovery_suggestions ADD COLUMN episodes INTEGER;
+ALTER TABLE discovery_suggestions ADD COLUMN status TEXT;

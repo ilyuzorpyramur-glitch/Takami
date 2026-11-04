@@ -67,6 +67,12 @@ data class DiscoverySuggestion(
     val sourceId: Long? = null,
     val sourceUrl: String? = null,
     val genres: List<String> = emptyList(),
+    /** Оценка провайдера в шкале 0..10; null — оценки нет. */
+    val rating: Double? = null,
+    /** Число серий; null — провайдер его не назвал. */
+    val episodes: Int? = null,
+    /** Статус выпуска общим ключом; null — неизвестен. */
+    val status: String? = null,
 )
 
 /** Строка `discovery_hidden` для backup (негативный сигнал пользователя). */

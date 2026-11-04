@@ -34,6 +34,9 @@ object DiscoveryMapper {
         genres = row.genres?.splitToSequence(",")
             ?.mapNotNull { it.trim().takeIf(String::isNotEmpty) }
             ?.toList().orEmpty(),
+        rating = row.rating,
+        episodes = row.episodes,
+        status = row.status,
     )
 }
 
@@ -74,6 +77,9 @@ class DiscoveryRepositoryImpl(
                     source_id = item.sourceId,
                     source_url = item.sourceUrl,
                     genres = item.genres.joinToString(","),
+                    rating = item.rating,
+                    episodes = item.episodes?.toLong(),
+                    status = item.status,
                 )
             }
         }

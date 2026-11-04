@@ -28,6 +28,7 @@ internal data class ShikimoriMediaItem(
     val status: String? = null,
     val kind: String? = null,
     val description: String? = null,
+    val episodes: Int? = null,
     val genres: List<ShikimoriGenre>? = null,
     val url: String? = null,
 )
@@ -99,6 +100,8 @@ internal fun parseShikimoriItems(
         // V1: сырой статус Shikimori — для пост-фильтра при множественном выборе.
         releaseStatus = item.status,
         altTitle = altTitle,
+        rating = RatingScale.fromTen(item.score),
+        episodes = item.episodes?.takeIf { it > 0 },
     )
 }
 
