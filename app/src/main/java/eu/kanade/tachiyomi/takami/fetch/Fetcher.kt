@@ -281,12 +281,19 @@ class Fetcher internal constructor(
       * проигнорировать
      * Range, и тогда без ограничения мы бы скачали весь файл.
      */
-    suspend fun probe(url: String, referer: String? = null): String {
+    suspend fun probe(
+        url: String,
+        referer: String? = null,
+        headers: Map<String, String> = emptyMap(),
+    ): String {
         currentCoroutineContext().ensureActive()
         val host = hostOf(url)
         return guard.run(host) {
             currentCoroutineContext().ensureActive()
-            val request = request(url, referer)
+            val builder = request(url, referer)
+            // Заголовки окна: мастер HLS без них отвечает отказом.
+            headers.forEach { (name, value) -> if (value.isNotBlank()) builder.header(name, value) }
+            val request = builder
                 .header("Range", "bytes=0-" + (FetchLimits.PROBE_BYTES - 1))
                 .build()
             val response = execute(request, host)
@@ -674,6 +681,11 @@ class Fetcher internal constructor(
         }
         return buffer.readByteArray()
     }
+
+    /** Домен в паузе брейкера: не долбим упавший сайт. */
+    fun isPaused(host: String): Boolean = runCatching {
+        breaker?.state(host)?.state == BreakerState.OPEN
+    }.getOrDefault(false)
 
     private fun request(url: String, referer: String?): Request.Builder {
         val builder = try {

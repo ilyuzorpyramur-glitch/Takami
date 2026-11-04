@@ -2,6 +2,8 @@ package eu.kanade.tachiyomi.takami
 
 import eu.kanade.tachiyomi.takami.video.Dubbing
 import eu.kanade.tachiyomi.takami.video.VideoStream
+import eu.kanade.tachiyomi.takami.video.sniff.SniffResult
+import eu.kanade.tachiyomi.takami.video.sniff.SniffVerdict
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -128,30 +130,32 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
             dubbings = Dubbing.names(streams.map { it.dubbing })
             hoster = hosterOf(spec, streams)
             val playable = streams.firstOrNull()
-            val media = playable != null && looksLikeMedia(engine.probe(playable.url, episode.url))
-            val videoOk = streams.isNotEmpty() && media
+            // Мастер HLS без заголовков окна отвечает отказом: проверяем как плеер.
+            val media = playable != null &&
+                looksLikeMedia(engine.probe(playable.url, episode.url, playable.headers))
+            val verdict = SniffVerdict.of(SniffResult(stopReason = found.stopReason), streams.size, media)
+            val videoOk = verdict == SniffVerdict.OK
             if (!videoOk) {
-                val error = when {
-                    streams.isEmpty() && found.blocked -> "player_blocked"
-                    streams.isEmpty() -> "no_links"
-                    else -> "no_video"
-                }
-                ParseFailures.noteFailure(spec.host, "video", error, spec.version)
+                ParseFailures.noteFailure(spec.host, "video", errorOf(verdict), spec.version)
             }
             results += CheckResult(
                 key = "video",
                 title = "Видео",
                 ok = videoOk,
-                note = when {
-                    streams.isEmpty() && found.blocked -> "плеер не раскрылся"
-                    streams.isEmpty() -> "ссылок нет"
-                    !media -> "ссылка не отдаёт поток"
-                    else -> streams.size.toString() + " ссылок"
-                },
+                note = SniffVerdict.text(verdict, streams.size, found.layer),
             )
         }
 
         SelfCheckReport(results, dubbings, qualities, streams, hoster)
+    }
+
+    /** Короткий тип провала: без текста страницы и без адресов. */
+    private fun errorOf(verdict: String): String = when (verdict) {
+        SniffVerdict.DRM -> "drm"
+        SniffVerdict.UNAVAILABLE -> "unavailable"
+        SniffVerdict.BLOCKED -> "player_blocked"
+        SniffVerdict.NO_VIDEO -> "no_video"
+        else -> "no_links"
     }
 
     /** Плеер узнаём по адресу из спеки, иначе — по типу файла. */

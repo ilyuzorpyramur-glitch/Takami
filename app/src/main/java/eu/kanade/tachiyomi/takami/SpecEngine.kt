@@ -7,12 +7,20 @@ import eu.kanade.tachiyomi.takami.fetch.FetchedPage
 import eu.kanade.tachiyomi.takami.fetch.Fetcher
 import eu.kanade.tachiyomi.takami.video.Dubbing
 import eu.kanade.tachiyomi.takami.video.Budget
+import eu.kanade.tachiyomi.takami.video.config.MediaMiner
 import eu.kanade.tachiyomi.takami.video.Chain
 import eu.kanade.tachiyomi.takami.video.DubbingTrack
 import eu.kanade.tachiyomi.takami.video.HlsMaster
 import eu.kanade.tachiyomi.takami.video.Quality
 import eu.kanade.tachiyomi.takami.video.QualityLink
 import eu.kanade.tachiyomi.takami.video.VideoStream
+import eu.kanade.tachiyomi.takami.video.sniff.LinkHeaders
+import eu.kanade.tachiyomi.takami.video.sniff.MediaFilter
+import eu.kanade.tachiyomi.takami.video.sniff.SniffBridge
+import eu.kanade.tachiyomi.takami.video.sniff.SniffLayer
+import eu.kanade.tachiyomi.takami.video.sniff.SniffPolicy
+import eu.kanade.tachiyomi.takami.video.sniff.SniffRequest
+import eu.kanade.tachiyomi.takami.video.sniff.SniffResult
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import org.jsoup.Jsoup
@@ -202,8 +210,15 @@ class SpecEngine(
     /** Ссылки для запуска серии: качество отдельной подписью. */
     suspend fun videos(spec: SiteSpec, episode: SEpisode, dubbing: String? = null): List<Video> =
         streams(spec, episode, dubbing).map { stream ->
-            Video(stream.url, Quality.text(stream.quality), stream.url)
+            Video(
+                videoUrl = stream.url,
+                videoTitle = Quality.text(stream.quality) + dubbingSuffix(stream.dubbing),
+                headers = LinkHeaders.okhttp(stream.headers),
+            )
         }
+
+    private fun dubbingSuffix(dubbing: String): String =
+        if (dubbing.isBlank()) "" else " · " + dubbing
 
     /**
      * Ссылки с двумя осями: озвучка и качество считаются отдельно.
@@ -237,6 +252,37 @@ class SpecEngine(
             found += result.links
             blocked = blocked || result.blocked
         }
+        // Слой 1 — статика. Пусто — слой 2, шахта конфига на уже загруженной странице.
+        var layer = if (found.isNotEmpty()) SniffLayer.STATIC else ""
+        val mode = spec.video.sniff.modeOrDefault
+        if (found.isEmpty() && mode != SniffSpec.MODE_NEVER) {
+            val mined = MediaMiner.mine(page.html, page.url, spec.video)
+            if (mined.isNotEmpty()) {
+                found += mined.map { QualityLink(it.url, quality = it.quality, kind = it.kind) }
+                layer = SniffLayer.CONFIG
+            }
+        }
+        // Слой 3 — снимок сети: только если пусты первые два.
+        var sniff = SniffResult()
+        val maySniff = mode != SniffSpec.MODE_NEVER &&
+            SniffPolicy.canSniff(spec, spec.host, paused(spec.host))
+        if (found.isEmpty() && maySniff) {
+            sniff = SniffBridge.run(
+                SniffRequest(
+                    url = episode.url,
+                    referer = page.url,
+                    timeoutMs = spec.video.sniff.timeoutMs,
+                    settleMs = spec.video.sniff.settleMs,
+                    maxPages = spec.video.sniff.maxPages,
+                ),
+            )
+            val kept = MediaFilter.keep(sniff.hits, spec.video.sniff)
+            if (kept.isNotEmpty()) {
+                val headers = LinkHeaders.passable(spec.video.sniff, page.url)
+                found += kept.map { QualityLink(it.url, kind = "sniff", headers = headers) }
+                layer = SniffLayer.SNIFF
+            }
+        }
         val expanded = expandMaster(spec, found, episode.url, budget)
         val chosen = when {
             dubbing.isNullOrBlank() -> expanded
@@ -244,8 +290,16 @@ class SpecEngine(
             else -> expanded.filter { it.dubbing.equals(dubbing, ignoreCase = true) }
         }
         val streams = Quality.arrange(chosen, spec.video.preferred).map { VideoStream.of(it) }
-        return LinkReport(streams = streams, blocked = blocked && streams.isEmpty())
+        return LinkReport(
+            streams = streams,
+            blocked = blocked && streams.isEmpty(),
+            layer = if (streams.isEmpty()) "" else layer,
+            stopReason = sniff.stopReason,
+        )
     }
+
+    /** Домен в паузе брейкера: снимок по нему не делаем. */
+    private fun paused(host: String): Boolean = runCatching { fetcher.isPaused(host) }.getOrDefault(false)
     private data class Track(val name: String, val html: String)
 
     /**
@@ -365,8 +419,12 @@ class SpecEngine(
       * поток, а не страницу.
      * Трафик минимальный — Range 0..256.
      */
-    suspend fun probe(url: String, referer: String? = null): String = try {
-        fetcher.probe(url, referer)
+    suspend fun probe(
+        url: String,
+        referer: String? = null,
+        headers: Map<String, String> = emptyMap(),
+    ): String = try {
+        fetcher.probe(url, referer, headers)
     } catch (e: IOException) {
         ""
     }
@@ -437,4 +495,8 @@ class SpecEngine(
 data class LinkReport(
     val streams: List<VideoStream> = emptyList(),
     val blocked: Boolean = false,
+    /** Слой, который дал ссылку: разметка, конфиг или снимок. */
+    val layer: String = "",
+    /** Почему снимок остановился; пусто — снимок не делался. */
+    val stopReason: String = "",
 )

@@ -58,6 +58,8 @@ import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.takami.CheckResult
 import eu.kanade.tachiyomi.takami.SiteSpec
 import eu.kanade.tachiyomi.takami.TakamiForge
+import eu.kanade.tachiyomi.takami.video.sniff.MediaSniffer
+import eu.kanade.tachiyomi.takami.video.sniff.SniffBridge
 import eu.kanade.tachiyomi.takami.video.VideoStream
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.flow.collectLatest
@@ -79,6 +81,7 @@ class TakamiForgeScreen : Screen() {
         val screenModel = rememberScreenModel { TakamiForgeScreenModel() }
 
         TakamiForge.init(context)
+        MediaSniffer.attach(context)
 
         val state by screenModel.state.collectAsStateWithLifecycle()
         val saved by screenModel.saved.collectAsStateWithLifecycle()
@@ -90,6 +93,8 @@ class TakamiForgeScreen : Screen() {
         var dubbings by remember { mutableStateOf(emptyList<String>()) }
 
         LaunchedEffect(Unit) {
+            // Окно снимка подключается здесь: экран открыл человек, а не фон.
+            SniffBridge.attach { request -> MediaSniffer.capture(request) }
             screenModel.events.collectLatest { event ->
                 when (event) {
                     is ForgeEvent.Saved -> context.toast("Источник «${event.name}» добавлен")
