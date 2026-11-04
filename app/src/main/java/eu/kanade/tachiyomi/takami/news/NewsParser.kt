@@ -128,8 +128,8 @@ object NewsParser {
         if (title.isEmpty()) return null
         val dateRaw = spec.dateSelector?.let { card.selectFirst(it)?.text() }
         var body = card.text()
-        if (body.startsWith(title)) body = body.removePrefix(title)
-        dateRaw?.takeIf { it.isNotBlank() && body.startsWith(it) }?.let { body = body.removePrefix(it) }
+        if (body.startsWith(title)) body = body.removePrefix(title).trimStart()
+        dateRaw?.takeIf { it.isNotBlank() && body.startsWith(it) }?.let { body = body.removePrefix(it).trimStart() }
         return NewsItem(
             url = url,
             title = title,
