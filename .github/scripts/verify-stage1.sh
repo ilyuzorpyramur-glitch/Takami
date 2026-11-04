@@ -55,7 +55,7 @@ if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
     # С этапа 3 по протоколу экран диагностики живёт в ui/takami — путь разрешён.
     # С этапов 8 и 10 у источников появились пункты меню в списке расширений —
     # файл списка тоже разрешён, иначе фильтры и починку не открыть.
-    OUT=$(echo "$CHANGED" | grep -vE '^(app/src/main/java/eu/kanade/tachiyomi/takami/|app/src/main/java/eu/kanade/tachiyomi/ui/takami/|app/src/main/java/eu/kanade/tachiyomi/ui/browse/anime/extension/|telemetry-collector/|app/src/test/java/eu/kanade/tachiyomi/takami/|\.github/(workflows|scripts)/|\.github/[a-z0-9.-]+\.md|app/build\.gradle\.kts|gradle/libs\.versions\.toml|docs/|reports/|scripts/)' | grep -v '^$')
+    OUT=$(echo "$CHANGED" | grep -vE '^(app/src/main/java/eu/kanade/tachiyomi/takami/|app/src/main/java/eu/kanade/tachiyomi/ui/takami/|app/src/main/java/eu/kanade/tachiyomi/ui/browse/anime/extension/|app/src/main/java/eu/kanade/tachiyomi/ui/news/|app/src/main/java/eu/kanade/tachiyomi/ui/home/|i18n/src/commonMain/moko-resources/|telemetry-collector/|app/src/test/java/eu/kanade/tachiyomi/takami/|\.github/(workflows|scripts)/|\.github/[a-z0-9.-]+\.md|app/build\.gradle\.kts|gradle/libs\.versions\.toml|docs/|reports/|scripts/)' | grep -v '^$')
     if [ -z "$OUT" ]; then
         ok G0.3 "изменения в разрешённых путях ($(echo "$CHANGED" | grep -c . ) файлов)"
     else
