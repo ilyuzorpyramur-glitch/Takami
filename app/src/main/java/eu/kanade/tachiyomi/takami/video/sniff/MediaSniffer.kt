@@ -91,11 +91,12 @@ object MediaSniffer {
                     null -> Unit
                     MARK_UNAVAILABLE -> finish(SniffStop.UNAVAILABLE)
                     MARK_DRM -> finish(SniffStop.DRM)
-                    else -> {
+                    is SniffHit -> {
                         val first = state.hit(System.currentTimeMillis())
                         hits += hit
                         if (first) handler.postDelayed({ finish(SniffStop.FOUND) }, request.settleMs.toLong())
                     }
+                    else -> Unit
                 }
             }
 
