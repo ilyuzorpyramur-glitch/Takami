@@ -84,6 +84,9 @@ object KodikPlayer {
 
     private val VIDEO = Regex("""vInfo\.(id|hash|type)\s*=\s*'([^']*)'""")
 
+    /** Подпись озвучки, если списка переводов на странице нет. */
+    private val TRANSLATION_TITLE = Regex("""data-translation-title="([^"]*)"""")
+
     /** Это страница Kodik: у неё есть подпись запроса и данные видео. */
     fun looks(html: String): Boolean =
         html.contains("urlParams") && html.contains("vInfo.")
@@ -106,7 +109,7 @@ object KodikPlayer {
             series = series,
             translations = translations,
             seasons = seasonsOf(doc),
-            current = selected(doc, "translations")?.attr("data-title")?.trim().orEmpty(),
+            current = currentOf(doc, html),
             episode = selected(doc, "series")?.attr("value")?.trim()?.toIntOrNull() ?: 0,
         )
     }
@@ -159,6 +162,19 @@ object KodikPlayer {
                 episodes = node.attr("data-episode-count").trim().toIntOrNull() ?: 0,
             )
         }
+
+    /**
+     * Озвучка, открытая на странице.
+     *
+     * Список переводов есть не всегда: у страницы одной серии его может не
+     * быть. Тогда подпись берём из отметки перевода в списке сезонов — она
+     * называет ту же студию.
+     */
+    private fun currentOf(doc: Document, html: String): String {
+        val chosen = selected(doc, "translations")?.attr("data-title")?.trim().orEmpty()
+        if (chosen.isNotEmpty()) return chosen
+        return TRANSLATION_TITLE.find(html)?.groupValues?.get(1)?.trim().orEmpty()
+    }
 
     /** Вариант, который плеер открыл: подпись и номер серии берём у него. */
     private fun selected(doc: Document, kind: String): Element? {
