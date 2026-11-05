@@ -9,6 +9,15 @@ on:
       - ".github/workflows/takami-debug.yml"
       - "telemetry-collector/**"
   workflow_dispatch:
+    inputs:
+      abi:
+        description: "Архитектура APK: x86_64 (эмулятор) или arm64-v8a (телефон)"
+        required: false
+        default: x86_64
+        type: choice
+        options:
+          - x86_64
+          - arm64-v8a
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -56,8 +65,8 @@ jobs:
         env:
           SIGNATURE: ${{ secrets.TELEMETRY_TOKEN }}
 
-      - name: Build debug (x86_64)
-        run: ./gradlew :app:assembleDebug -Ptakami.abi=x86_64 --console=plain
+      - name: Build debug (${{ inputs.abi || 'x86_64' }})
+        run: ./gradlew :app:assembleDebug -Ptakami.abi=${{ inputs.abi || 'x86_64' }} --console=plain
         env:
           TELEMETRY_URL: ${{ secrets.TELEMETRY_URL }}
           TELEMETRY_TOKEN: ${{ secrets.TELEMETRY_TOKEN }}
@@ -71,6 +80,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: takami-debug-${{ github.sha }}
+          name: takami-debug-${{ inputs.abi || 'x86_64' }}-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
