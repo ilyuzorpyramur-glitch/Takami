@@ -38,6 +38,10 @@ data class DiscoveryTrendingItem(
     /** V1: сырой статус провайдера (Shikimori «ongoing/released/…»), для пост-фильтра. */
     val releaseStatus: String? = null,
     val altTitle: String? = null,
+    /** Оценка провайдера в шкале 0..10; null — оценки нет. */
+    val rating: Double? = null,
+    /** Число серий из того же ответа; null — провайдер его не назвал. */
+    val episodes: Int? = null,
 )
 
 data class DiscoveryMeta(
@@ -82,10 +86,13 @@ internal fun resolveSeasonWindow(nowMonth: Int, nowYear: Int, next: Boolean): Pa
 internal fun buildSeasonQuery(hasStatuses: Boolean): String {
     val statusArg = if (hasStatuses) ", status_in: \$statuses" else ""
     return """
-        query (${'$'}season: MediaSeason, ${'$'}year: Int, ${'$'}sort: [MediaSort], ${'$'}page: Int, ${'$'}isAdult: Boolean${if (hasStatuses) ", ${'$'}statuses: [MediaStatus]" else ""}) {
+        query (${'$'}season: MediaSeason,
+            ${'$'}isAdult: Boolean${if (hasStatuses) ", ${'$'}statuses: [MediaStatus]" else ""}) {,
           Page(page: ${'$'}page, perPage: 50) {
-            media(type: ANIME, season: ${'$'}season, seasonYear: ${'$'}year, sort: ${'$'}sort, isAdult: ${'$'}isAdult$statusArg) {
-              id title { romaji english native } coverImage { large } genres
+            media(type: ANIME,
+                isAdult: ${'$'}isAdult$statusArg) {,
+              id title { romaji english native } coverImage { large }
+              genres averageScore episodes
             }
           }
         }
@@ -96,10 +103,12 @@ internal fun buildPopularQuery(format: String?, hasStatuses: Boolean): String {
     val formatArg = if (format != null) ", format: \$format" else ""
     val statusArg = if (hasStatuses) ", status_in: \$statuses" else ""
     return """
-        query (${'$'}type: MediaType, ${'$'}sort: [MediaSort], ${'$'}page: Int, ${'$'}isAdult: Boolean${if (format != null) ", ${'$'}format: MediaFormat" else ""}${if (hasStatuses) ", ${'$'}statuses: [MediaStatus]" else ""}) {
+        query (${'$'}type: MediaType,
+            ${'$'}isAdult: Boolean${if (format != null) ", ${'$'}format: MediaFormat" else ""}${if (hasStatuses) ", ${'$'}statuses: [MediaStatus]" else ""}) {,
           Page(page: ${'$'}page, perPage: 50) {
             media(type: ${'$'}type, sort: ${'$'}sort, isAdult: ${'$'}isAdult$formatArg$statusArg) {
-              id title { romaji english native } coverImage { large } genres
+              id title { romaji english native } coverImage { large }
+              genres averageScore episodes
             }
           }
         }
@@ -131,6 +140,11 @@ internal fun parseTrendingPage(page: JsonObject, seasonLabel: String? = null): L
                 genres = (media["genres"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
                 provider = "anilist_trend",
                 altTitle = altTitle,
+                rating = RatingScale.fromHundred(
+                    media["averageScore"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull(),
+                ),
+                episodes = media["episodes"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    ?.takeIf { it > 0 },
             )
         }
         .orEmpty()
@@ -311,10 +325,13 @@ open class AniListTrendingSource(
         val formatArg = if (format != null) ", format: ${'$'}format" else ""
         val statusArg = if (releaseStatuses.isNotEmpty()) ", status_in: ${'$'}statuses" else ""
         val query = """
-            query (${'$'}type: MediaType, ${'$'}genres: [String], ${'$'}sort: [MediaSort], ${'$'}page: Int, ${'$'}isAdult: Boolean${if (format != null) ", ${'$'}format: MediaFormat" else ""}${if (releaseStatuses.isNotEmpty()) ", ${'$'}statuses: [MediaStatus]" else ""}) {
+            query (${'$'}type: MediaType,
+                ${'$'}isAdult: Boolean${if (format != null) ", ${'$'}format: MediaFormat" else ""}${if (releaseStatuses.isNotEmpty()) ", ${'$'}statuses: [MediaStatus]" else ""}) {,
               Page(page: ${'$'}page, perPage: 50) {
-                media(type: ${'$'}type, genre_in: ${'$'}genres, sort: ${'$'}sort, isAdult: ${'$'}isAdult$formatArg$statusArg) {
-                  id title { romaji english native } coverImage { large } genres
+                media(type: ${'$'}type,
+                    isAdult: ${'$'}isAdult$formatArg$statusArg) {,
+                  id title { romaji english native } coverImage { large }
+              genres averageScore episodes
                 }
               }
             }
