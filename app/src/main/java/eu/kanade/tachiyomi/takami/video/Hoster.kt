@@ -152,7 +152,11 @@ object Chain {
             if (KodikChain.looks(answer)) {
                 axes = axes.plus(KodikChain.axes(answer))
                 val kodik = KodikChain.links(answer, url, dubbing, budget, post)
-                logcat(LogPriority.DEBUG) { "Takami chain: плеер Kodik, ссылок " + kodik.size }
+                logcat(LogPriority.DEBUG) {
+                    "Takami chain: плеер Kodik, ссылок " + kodik.size +
+                        ", озвучек " + axes.dubbings.size + ", серий " + axes.episodes +
+                        ", открыта " + axes.current
+                }
                 if (kodik.isNotEmpty()) {
                     links += kodik
                     continue
