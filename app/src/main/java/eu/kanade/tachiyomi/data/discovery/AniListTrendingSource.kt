@@ -84,12 +84,21 @@ internal fun resolveSeasonWindow(nowMonth: Int, nowYear: Int, next: Boolean): Pa
 }
 
 internal fun buildSeasonQuery(hasStatuses: Boolean): String {
-    val statusArg = if (hasStatuses) ", status_in: \$statuses" else ""
+    val statusArg = if (hasStatuses) ", status_in: ${'$'}statuses" else ""
+    val statusesDecl = if (hasStatuses) ", ${'$'}statuses: [MediaStatus]" else ""
     return """
-        query (${'$'}season: MediaSeason, ${'$'}year: Int, ${'$'}sort: [MediaSort], ${'$'}page: Int, ${'$'}isAdult: Boolean${if (hasStatuses) ", ${'$'}statuses: [MediaStatus]" else ""}) {
+        query (
+            ${'$'}season: MediaSeason, ${'$'}year: Int, ${'$'}sort: [MediaSort],
+            ${'$'}page: Int, ${'$'}isAdult: Boolean$statusesDecl
+        ) {
           Page(page: ${'$'}page, perPage: 50) {
-            media(type: ANIME, season: ${'$'}season, seasonYear: ${'$'}year, sort: ${'$'}sort, isAdult: ${'$'}isAdult$statusArg) {
-              id title { romaji english native } coverImage { large } genres averageScore episodes
+            media(
+                type: ANIME, season: ${'$'}season, seasonYear: ${'$'}year,
+                sort: ${'$'}sort, isAdult: ${'$'}isAdult$statusArg,
+            ) {
+              id title { romaji english native }
+              coverImage { large }
+              genres averageScore episodes
             }
           }
         }
@@ -97,52 +106,27 @@ internal fun buildSeasonQuery(hasStatuses: Boolean): String {
 }
 
 internal fun buildPopularQuery(format: String?, hasStatuses: Boolean): String {
-    val formatArg = if (format != null) ", format: \$format" else ""
-    val statusArg = if (hasStatuses) ", status_in: \$statuses" else ""
+    val formatArg = if (format != null) ", format: ${'$'}format" else ""
+    val statusArg = if (hasStatuses) ", status_in: ${'$'}statuses" else ""
+    val formatDecl = if (format != null) ", ${'$'}format: MediaFormat" else ""
+    val statusesDecl = if (hasStatuses) ", ${'$'}statuses: [MediaStatus]" else ""
     return """
-        query (${'$'}type: MediaType, ${'$'}sort: [MediaSort], ${'$'}page: Int, ${'$'}isAdult: Boolean${if (format != null) ", ${'$'}format: MediaFormat" else ""}${if (hasStatuses) ", ${'$'}statuses: [MediaStatus]" else ""}) {
+        query (
+            ${'$'}type: MediaType, ${'$'}sort: [MediaSort], ${'$'}page: Int,
+            ${'$'}isAdult: Boolean$formatDecl$statusesDecl
+        ) {
           Page(page: ${'$'}page, perPage: 50) {
-            media(type: ${'$'}type, sort: ${'$'}sort, isAdult: ${'$'}isAdult$formatArg$statusArg) {
-              id title { romaji english native } coverImage { large } genres averageScore episodes
+            media(
+                type: ${'$'}type, sort: ${'$'}sort, isAdult: ${'$'}isAdult$formatArg$statusArg,
+            ) {
+              id title { romaji english native }
+              coverImage { large }
+              genres averageScore episodes
             }
           }
         }
     """.trimIndent()
 }
-
-internal fun parseTrendingPage(page: JsonObject, seasonLabel: String? = null): List<DiscoveryTrendingItem> =
-    (((page["data"] as? JsonObject)?.get("Page") as? JsonObject)?.get("media") as? JsonArray)
-        ?.mapNotNull { it as? JsonObject }
-        ?.mapNotNull { media ->
-            val titleObj = media["title"] as? JsonObject
-            val romaji = titleObj?.get("romaji")?.jsonPrimitive?.contentOrNull
-            val english = titleObj?.get("english")?.jsonPrimitive?.contentOrNull
-            val native = titleObj?.get("native")?.jsonPrimitive?.contentOrNull
-            val title = romaji ?: english ?: native ?: return@mapNotNull null
-            val altTitle = if (title == romaji) {
-                english ?: native
-            } else if (title == english) {
-                romaji ?: native
-            } else {
-                romaji ?: english
-            }
-            DiscoveryTrendingItem(
-                title = title,
-                cleanTitle = normalizeDiscoveryTitle(title),
-                coverUrl = (media["coverImage"] as? JsonObject)?.get("large")?.jsonPrimitive?.contentOrNull,
-                anilistId = media["id"]?.jsonPrimitive?.longOrNull ?: 0L,
-                seasonLabel = seasonLabel,
-                genres = (media["genres"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
-                provider = "anilist_trend",
-                altTitle = altTitle,
-                rating = RatingScale.fromHundred(
-                    media["averageScore"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull(),
-                ),
-                episodes = media["episodes"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                    ?.takeIf { it > 0 },
-            )
-        }
-        .orEmpty()
 
 open class AniListTrendingSource(
     private val clientProvider: () -> okhttp3.OkHttpClient = { Injekt.get<NetworkHelper>().client },
@@ -319,11 +303,21 @@ open class AniListTrendingSource(
     ): List<DiscoveryTrendingItem> {
         val formatArg = if (format != null) ", format: ${'$'}format" else ""
         val statusArg = if (releaseStatuses.isNotEmpty()) ", status_in: ${'$'}statuses" else ""
+        val formatDecl = if (format != null) ", ${'$'}format: MediaFormat" else ""
+        val statusesDecl = if (releaseStatuses.isNotEmpty()) ", ${'$'}statuses: [MediaStatus]" else ""
         val query = """
-            query (${'$'}type: MediaType, ${'$'}genres: [String], ${'$'}sort: [MediaSort], ${'$'}page: Int, ${'$'}isAdult: Boolean${if (format != null) ", ${'$'}format: MediaFormat" else ""}${if (releaseStatuses.isNotEmpty()) ", ${'$'}statuses: [MediaStatus]" else ""}) {
+            query (
+                ${'$'}type: MediaType, ${'$'}genres: [String], ${'$'}sort: [MediaSort],
+                ${'$'}page: Int, ${'$'}isAdult: Boolean$formatDecl$statusesDecl
+            ) {
               Page(page: ${'$'}page, perPage: 50) {
-                media(type: ${'$'}type, genre_in: ${'$'}genres, sort: ${'$'}sort, isAdult: ${'$'}isAdult$formatArg$statusArg) {
-                  id title { romaji english native } coverImage { large } genres averageScore episodes
+                media(
+                    type: ${'$'}type, genre_in: ${'$'}genres, sort: ${'$'}sort,
+                    isAdult: ${'$'}isAdult$formatArg$statusArg,
+                ) {
+                  id title { romaji english native }
+                  coverImage { large }
+                  genres averageScore episodes
                 }
               }
             }
