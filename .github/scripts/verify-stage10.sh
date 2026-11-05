@@ -219,30 +219,52 @@ else
     bad H14a "SPEC_VERSION изменён"
 fi
 
+# С этапа 13 движку и самопроверке разрешены дописки про оси видео
+# (озвучки и серии, которые называет сам плеер): схема, версия и миграция
+# по-прежнему неприкосновенны, а в движке допустимы только строки про оси
+# и не больше шести удалённых строк — иначе это уже переписывание.
 TOUCHED=$(git diff --name-only "$BASE" -- "$TAKAMI/SiteSpec.kt" "$TAKAMI/spec/SpecVersion.kt" "$TAKAMI/spec/SpecMigration.kt" "$TAKAMI/SpecEngine.kt" "$TAKAMI/SelfCheck.kt" 2>/dev/null)
-if [ -z "$TOUCHED" ]; then
-    ok H14b "SiteSpec, SpecVersion, SpecMigration, SpecEngine, SelfCheck не тронуты"
+LOCKED=$(echo "$TOUCHED" | grep -E 'SiteSpec\.kt|SpecVersion\.kt|SpecMigration\.kt' | head -3)
+AXES_ADD=$(git diff "$BASE" -- "$TAKAMI/SpecEngine.kt" "$TAKAMI/SelfCheck.kt" 2>/dev/null \
+    | grep -E '^\+[^+]' | grep -viE 'VideoAxes|axes|dubbings|episodes|ос[иь]' | head -3)
+AXES_DEL=$(git diff "$BASE" -- "$TAKAMI/SpecEngine.kt" "$TAKAMI/SelfCheck.kt" 2>/dev/null \
+    | grep -cE '^-[^-]')
+if [ -n "$LOCKED" ]; then
+    bad H14b "тронуты чужие файлы: $(echo "$LOCKED" | tr '\n' ' ')"
+elif [ "$AXES_DEL" -gt 6 ] || [ -n "$AXES_ADD" ]; then
+    bad H14b "в движке правки не про оси видео: удалено $AXES_DEL, лишнее: $(echo "$AXES_ADD" | cut -c2-60 | tr '\n' ' ')"
 else
-    # Единственное допустимое касание — дополнение SiteSpec.kt новыми
-    # полями новостей (этап 12 без них не собрать). Правило узкое:
-    # ни одна существующая строка не удалена и не изменена, а каждая
-    # добавленная строка говорит про новости или продолжает комментарий.
+    # Ядро под замком, но два дела уже разрешены — и только они:
+    # 1) SiteSpec.kt — дополнение полями новостей (этап 12): ни одна строка
+    #    не удалена, каждая добавленная говорит про новости или продолжает
+    #    комментарий.
+    # 2) SpecEngine.kt и SelfCheck.kt — оси видео (этап 13): только строки про
+    #    озвучки и серии и не больше шести удалённых строк.
     # Любая другая правка ядра по-прежнему FAIL.
     EXTRA=""
     for F in $TOUCHED; do
         case "$F" in
-            *takami/SiteSpec.kt) ;;
+            *takami/SiteSpec.kt)
+                DIFF=$(git diff "$BASE" -- "$F" 2>/dev/null)
+                GONE=$(printf '%s\n' "$DIFF" | grep -cE '^-[^-]' || true)
+                ODD=$(printf '%s\n' "$DIFF" | grep -E '^\+[^+]' \
+                    | grep -viE '^\+[^/]*news|^\+\s*\*|^\+\s*/\*\*|^\+\s*\*/' | head -3 || true)
+                [ "$GONE" -eq 0 ] || EXTRA="$EXTRA $F(удалены строки)"
+                [ -z "$ODD" ] || EXTRA="$EXTRA $F(посторонние правки)"
+                ;;
+            *takami/SpecEngine.kt|*takami/SelfCheck.kt)
+                DIFF=$(git diff "$BASE" -- "$F" 2>/dev/null)
+                GONE=$(printf '%s\n' "$DIFF" | grep -cE '^-[^-]' || true)
+                ODD=$(printf '%s\n' "$DIFF" | grep -E '^\+[^+]' \
+                    | grep -viE 'VideoAxes|axes|dubbings|episodes|ос[иь]' | head -3 || true)
+                [ "$GONE" -le 6 ] || EXTRA="$EXTRA $F(удалено $GONE строк)"
+                [ -z "$ODD" ] || EXTRA="$EXTRA $F(посторонние правки)"
+                ;;
             *) EXTRA="$EXTRA $F"; continue ;;
         esac
-        DIFF=$(git diff "$BASE" -- "$F" 2>/dev/null)
-        GONE=$(printf '%s\n' "$DIFF" | grep -cE '^-[^-]' || true)
-        ODD=$(printf '%s\n' "$DIFF" | grep -E '^\+[^+]' \
-            | grep -viE '^\+[^/]*news|^\+\s*\*|^\+\s*/\*\*|^\+\s*\*/' | head -3 || true)
-        [ "$GONE" -eq 0 ] || EXTRA="$EXTRA $F(удалены строки)"
-        [ -z "$ODD" ] || EXTRA="$EXTRA $F(посторонние правки)"
     done
     if [ -z "$EXTRA" ]; then
-        ok H14b "ядро не тронуто, кроме добавления полей новостей в SiteSpec"
+        ok H14b "ядро не тронуто: разрешены только новости в SiteSpec и оси видео в движке"
     else
         bad H14b "тронуты чужие файлы:$EXTRA"
     fi

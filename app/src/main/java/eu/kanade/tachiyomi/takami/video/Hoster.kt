@@ -65,8 +65,13 @@ class Budget(rest: Int) {
     }
 }
 
-/** Итог обхода: ссылки и признак «плеер не раскрылся». */
-data class ChainResult(val links: List<QualityLink> = emptyList(), val blocked: Boolean = false)
+/** Итог обхода: ссылки, признак «плеер не раскрылся» и оси плеера. */
+data class ChainResult(
+    val links: List<QualityLink> = emptyList(),
+    val blocked: Boolean = false,
+    /** Озвучки и серии, которые назвал сам плеер; пусто — не называл. */
+    val axes: VideoAxes = VideoAxes(),
+)
 
 /**
  * Обход цепочки «страница серии → плееры → страница плеера → карта».
@@ -108,6 +113,7 @@ object Chain {
         val links = mutableListOf<QualityLink>()
         links += Drafts.links(spec, html, pageUrl, dubbing)
         var blocked = false
+        var axes = VideoAxes()
 
         val queue = ArrayDeque<Pair<String, Int>>()
         // Реле плеера идёт первым: кадр собирается скриптом, в разметке его
@@ -144,6 +150,7 @@ object Chain {
             }
             // Плеер Kodik ссылок в разметке не держит: только ответ на запрос.
             if (KodikChain.looks(answer)) {
+                axes = axes.plus(KodikChain.axes(answer))
                 val kodik = KodikChain.links(answer, url, dubbing, budget, post)
                 logcat(LogPriority.DEBUG) { "Takami chain: плеер Kodik, ссылок " + kodik.size }
                 if (kodik.isNotEmpty()) {
@@ -168,7 +175,7 @@ object Chain {
             if (depth >= spec.video.iframeDepth) continue
             Drafts.candidates(spec, answer, url).forEach { queue.addLast(it to depth + 1) }
         }
-        return ChainResult(Quality.byUrl(links).distinctBy { it.url }, blocked)
+        return ChainResult(Quality.byUrl(links).distinctBy { it.url }, blocked, axes)
     }
 
     /**
