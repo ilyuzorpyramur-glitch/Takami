@@ -921,9 +921,10 @@ private fun HomeHubScreen(
                 }
 
                 item(key = "home_swipe_entry", contentType = "home_hub_swipe_entry") {
+                    val swipeNavigator = LocalNavigator.currentOrThrow
                     HomeSwipeEntryCard(
                         onClick = {
-                            navigator.push(
+                            swipeNavigator.push(
                                 SwipeDiscoveryScreen(section.toDiscoveryMediaType().key),
                             )
                         },

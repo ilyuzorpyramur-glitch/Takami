@@ -194,11 +194,13 @@ internal class SwipeDiscoveryScreenModel(
                 true
             }
             DiscoveryMediaType.NOVEL -> {
-                Injekt.get<CreateNovelCategoryWithName>().await(name)
-                val target = Injekt.get<GetNovelCategories>().await().firstOrNull { it.name == name }
+                val categories = Injekt.get<GetNovelCategories>().await()
+                val categoryId = categories.firstOrNull { it.name == name }?.id
+                    ?: Injekt.get<CreateNovelCategoryWithName>()
+                        .await(name, categories.size.toLong(), 0L)
                     ?: return false
                 val current = Injekt.get<GetNovelCategories>().await(entryId).map { it.id }
-                Injekt.get<SetNovelCategories>().await(entryId, (current + target.id).distinct())
+                Injekt.get<SetNovelCategories>().await(entryId, (current + categoryId).distinct())
                 true
             }
         }

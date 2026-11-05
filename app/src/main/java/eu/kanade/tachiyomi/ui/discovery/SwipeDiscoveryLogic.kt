@@ -39,6 +39,9 @@ object SwipeLogic {
     /** Сколько обложек готовим вперёд. */
     const val PREFETCH = 3
 
+    /** Стек из готового списка: порядок подборки сохраняется, предел — тридцать. */
+    fun stack(cards: List<DiscoverySuggestion>): SwipeStack = SwipeStack(cards.take(MAX_CARDS))
+
     /** Оценка в шкале 0..10; ноль, отрицательное и больше десяти — «нет оценки». */
     fun rating(raw: Double?): Double? {
         val value = raw ?: return null
