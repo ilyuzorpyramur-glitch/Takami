@@ -86,7 +86,7 @@ object Chain {
         dubbing: String,
         budget: Budget = Budget(spec.video.maxRequests),
         fetch: suspend (String) -> String?,
-    ): ChainResult = collect(spec, html, pageUrl, dubbing, budget, appPost(), appText(), fetch)
+    ): ChainResult = collect(spec, html, pageUrl, dubbing, budget, appPost(), appText(pageUrl), fetch)
 
     /**
      * Тот же обход с явным запросом с телом.
@@ -202,8 +202,9 @@ object Chain {
     }
 
     /** Чтение ответа без ворот HTML: служебные ответы плееров — это JSON. */
-    private fun appText(): RelayText = { url ->
-        runCatching { Fetcher.get().getText(url) }
+    private fun appText(page: String): RelayText = { url ->
+        // Ссылка на себя: без неё служебный адрес отвечает «не найдено».
+        runCatching { Fetcher.get().getText(url, page) }
             .onFailure { logcat(LogPriority.DEBUG) { "Takami chain: чтение не прошло " + why(it) } }
             .getOrNull()
     }

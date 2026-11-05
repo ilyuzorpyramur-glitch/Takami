@@ -289,7 +289,7 @@ class Fetcher internal constructor(
     /** То же для запроса с телом: ссылки плеера приходят ответом на POST. */
     suspend fun postText(url: String, body: String, referer: String? = null): String {
         currentCoroutineContext().ensureActive()
-        return textOf(send(url, referer, FetchPriority.INTERACTIVE, post = body))
+        return textOf(send(url, referer, FetchPriority.INTERACTIVE, post = body, form = true))
     }
 
     /** Текст ответа: код проверяем, пустое тело — ошибка, ворота не зовём. */
@@ -482,10 +482,11 @@ class Fetcher internal constructor(
         head: Boolean = false,
         post: String? = null,
         headers: Map<String, String> = emptyMap(),
+        form: Boolean = false,
     ): Raw {
         currentCoroutineContext().ensureActive()
         return RetryPolicy().execute(guard.timeSource) {
-            attempt(url, referer, priority, head, post, headers)
+            attempt(url, referer, priority, head, post, headers, form)
         }
     }
 
@@ -496,6 +497,7 @@ class Fetcher internal constructor(
         head: Boolean,
         post: String?,
         headers: Map<String, String>,
+        form: Boolean = false,
     ): Raw {
         currentCoroutineContext().ensureActive()
         val host = hostOf(url)
@@ -509,7 +511,7 @@ class Fetcher internal constructor(
         // и повтор внутри той же операции уже не имеет смысла.
         val probing = gate?.state(host)?.state == BreakerState.HALF_OPEN
         val first = try {
-            sendOnce(url, referer, priority, head, post, headers, host)
+            sendOnce(url, referer, priority, head, post, headers, host, form)
         } catch (e: IOException) {
             gate?.onFailure(host, e.message)
             noteFailure(url, e)
@@ -526,7 +528,7 @@ class Fetcher internal constructor(
         if (first.protection.level == ProtectionLevel.BROWSER_CHECK) {
             if (passBrowser(first.url, host) != null) {
                 val again = try {
-                    sendOnce(url, referer, priority, head, post, headers, host)
+                    sendOnce(url, referer, priority, head, post, headers, host, form)
                 } catch (e: IOException) {
                     gate?.onFailure(host, e.message)
                     throw e
@@ -563,6 +565,7 @@ class Fetcher internal constructor(
         post: String?,
         headers: Map<String, String>,
         host: String,
+        form: Boolean = false,
     ): Raw = guard.run(host, priority) {
         // Пока ждали слот и интервал, экран могли закрыть.
         currentCoroutineContext().ensureActive()
@@ -571,7 +574,7 @@ class Fetcher internal constructor(
         headers.forEach { (name, value) -> builder.header(name, value) }
         val request = when {
             head -> builder.head().build()
-            post != null -> builder.post(post.toRequestBody(htmlMediaType)).build()
+            post != null -> builder.post(post.toRequestBody(if (form) formMediaType else htmlMediaType)).build()
             else -> builder.get().build()
         }
         val response = execute(request, host)
@@ -905,3 +908,6 @@ class Fetcher internal constructor(
 }
 
 private val htmlMediaType = "text/html; charset=utf-8".toMediaType()
+
+/** Тело служебного запроса плеера: обычная форма. */
+private val formMediaType = "application/x-www-form-urlencoded".toMediaType()
