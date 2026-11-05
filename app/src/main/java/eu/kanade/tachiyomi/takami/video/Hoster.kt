@@ -5,6 +5,7 @@ import eu.kanade.tachiyomi.takami.SiteSpec
 import eu.kanade.tachiyomi.takami.fetch.Fetcher
 import eu.kanade.tachiyomi.takami.video.kodik.KodikChain
 import eu.kanade.tachiyomi.takami.video.kodik.RelayPost
+import eu.kanade.tachiyomi.takami.video.kodik.RelayText
 import eu.kanade.tachiyomi.takami.video.relay.PlayerRelay
 import org.jsoup.Jsoup
 
@@ -83,7 +84,7 @@ object Chain {
         dubbing: String,
         budget: Budget = Budget(spec.video.maxRequests),
         fetch: suspend (String) -> String?,
-    ): ChainResult = collect(spec, html, pageUrl, dubbing, budget, appPost(), fetch)
+    ): ChainResult = collect(spec, html, pageUrl, dubbing, budget, appPost(), appText(), fetch)
 
     /**
      * Тот же обход с явным запросом с телом.
@@ -98,6 +99,7 @@ object Chain {
         dubbing: String,
         budget: Budget,
         post: RelayPost,
+        text: RelayText,
         fetch: suspend (String) -> String?,
     ): ChainResult {
         if (html.isBlank()) return ChainResult(blocked = true)
@@ -108,7 +110,9 @@ object Chain {
         val queue = ArrayDeque<Pair<String, Int>>()
         Drafts.candidates(spec, html, pageUrl).forEach { queue.addLast(it to 0) }
         // Реле плеера: кадр собирается скриптом, в разметке его нет.
-        PlayerRelay.endpoints(html, pageUrl).forEach { queue.addLast(it to 0) }
+        // Ответ реле — JSON, а не страница: его читаем отдельно.
+        val relays = PlayerRelay.endpoints(html, pageUrl)
+        relays.forEach { queue.addLast(it to 0) }
         while (queue.isNotEmpty()) {
             val (url, depth) = queue.removeFirst()
             if (!budget.take()) break
@@ -118,32 +122,32 @@ object Chain {
                 links += QualityLink(url, dubbing, "", HLS)
                 continue
             }
-            val page = fetch(url)
-            if (page.isNullOrBlank()) {
+            val answer = if (url in relays) text(url) else fetch(url)
+            if (answer.isNullOrBlank()) {
                 blocked = true
                 continue
             }
             // Ответ реле — адрес кадра плеера, а не страница: идём по нему.
-            val relayed = PlayerRelay.playerOf(page)
+            val relayed = PlayerRelay.playerOf(answer)
             if (relayed != null) {
                 if (depth < spec.video.iframeDepth) queue.addLast(relayed to depth + 1)
                 continue
             }
             // Плеер Kodik ссылок в разметке не держит: только ответ на запрос.
-            if (KodikChain.looks(page)) {
-                val kodik = KodikChain.links(page, url, dubbing, budget, post)
+            if (KodikChain.looks(answer)) {
+                val kodik = KodikChain.links(answer, url, dubbing, budget, post)
                 if (kodik.isNotEmpty()) {
                     links += kodik
                     continue
                 }
             }
             val found = (mapFrom(spec, hoster, url, dubbing, budget, fetch) +
-                Drafts.links(spec, page, url, dubbing)).distinctBy { it.url }
+                Drafts.links(spec, answer, url, dubbing)).distinctBy { it.url }
             if (found.isNotEmpty()) {
                 links += found
                 continue
             }
-            val redirect = Drafts.redirect(page, url)
+            val redirect = Drafts.redirect(answer, url)
             if (redirect != null && budget.take()) {
                 val next = fetch(redirect)
                 if (!next.isNullOrBlank()) {
@@ -152,14 +156,19 @@ object Chain {
                 continue
             }
             if (depth >= spec.video.iframeDepth) continue
-            Drafts.candidates(spec, page, url).forEach { queue.addLast(it to depth + 1) }
+            Drafts.candidates(spec, answer, url).forEach { queue.addLast(it to depth + 1) }
         }
         return ChainResult(Quality.byUrl(links).distinctBy { it.url }, blocked)
     }
 
     /** Запрос с телом через сетевой слой приложения: лимиты, паузы, повторы. */
     private fun appPost(): RelayPost = { url, body, referer ->
-        runCatching { Fetcher.get().post(url, body, referer) }.getOrNull()
+        runCatching { Fetcher.get().postText(url, body, referer) }.getOrNull()
+    }
+
+    /** Чтение ответа без ворот HTML: служебные ответы плееров — это JSON. */
+    private fun appText(): RelayText = { url ->
+        runCatching { Fetcher.get().getText(url) }.getOrNull()
     }
 
     /** Карта от плеера по шаблону из спеки: отдельный запрос, один раз. */

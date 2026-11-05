@@ -6,6 +6,9 @@ import eu.kanade.tachiyomi.takami.video.QualityLink
 /** Запрос с телом: плеер отдаёт ссылки только так. */
 typealias RelayPost = suspend (url: String, body: String, referer: String?) -> String?
 
+/** Чтение служебного ответа: это JSON, ворота HTML его не пропускают. */
+typealias RelayText = suspend (url: String) -> String?
+
 /**
  * Ссылки Kodik: страница плеера плюс один запрос.
  *
