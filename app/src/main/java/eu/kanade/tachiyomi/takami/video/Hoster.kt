@@ -108,11 +108,12 @@ object Chain {
         var blocked = false
 
         val queue = ArrayDeque<Pair<String, Int>>()
-        Drafts.candidates(spec, html, pageUrl).forEach { queue.addLast(it to 0) }
-        // Реле плеера: кадр собирается скриптом, в разметке его нет.
+        // Реле плеера идёт первым: кадр собирается скриптом, в разметке его
+        // нет, а потолок запросов общий — иначе до реле очередь не дойдёт.
         // Ответ реле — JSON, а не страница: его читаем отдельно.
         val relays = PlayerRelay.endpoints(html, pageUrl)
         relays.forEach { queue.addLast(it to 0) }
+        Drafts.candidates(spec, html, pageUrl).forEach { queue.addLast(it to 0) }
         while (queue.isNotEmpty()) {
             val (url, depth) = queue.removeFirst()
             if (!budget.take()) break
@@ -198,6 +199,15 @@ internal object Drafts {
 
     private val REDIRECT = Regex("""location\.href\s*=\s*["']([^"']+)["']""")
 
+    /** Теги, у которых `src` — это картинка или скрипт, а не плеер. */
+    private val NOT_PLAYER = setOf("script", "img", "link", "style", "meta", "picture")
+
+    /** Файлы, которые плеером быть не могут. */
+    private val USELESS = Regex(
+        """\.(?:js|css|jpe?g|png|webp|gif|svg|ico|woff2?|ttf|otf)(?:[?#].*)?$""",
+        RegexOption.IGNORE_CASE,
+    )
+
     /** Адреса встраивания со страницы: кадры, плееры, объекты, ссылки. */
     fun candidates(spec: SiteSpec, html: String, pageUrl: String): List<String> {
         if (html.isBlank()) return emptyList()
@@ -206,8 +216,12 @@ internal object Drafts {
         for (attr in spec.video.embedAttrs) {
             if (attr == "href") continue
             doc.select("[$attr]").forEach { node ->
+                // У скрипта и картинки `src` — не кадр плеера: такой
+                // запрос тратит потолок и ничего не даёт.
+                if (node.tagName().lowercase() in NOT_PLAYER) return@forEach
                 val url = MediaUrl.normalize(node.attr(attr), pageUrl)
-                if (url.isNotEmpty()) urls += url
+                if (url.isEmpty() || USELESS.containsMatchIn(url)) return@forEach
+                urls += url
             }
         }
         doc.select("a[href]").forEach { node ->

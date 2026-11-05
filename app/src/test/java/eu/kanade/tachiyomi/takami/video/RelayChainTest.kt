@@ -27,7 +27,11 @@ class RelayChainTest {
     private val relay = """{"status":true,"data":{"name":"Kodik","src":"$player"}}"""
 
     private val card = """
-        <html><body>
+        <html><head>
+          <script src="/static/app.js"></script>
+          <link rel="stylesheet" href="/static/site.css">
+        </head><body>
+          <img src="/static/poster.webp" alt="постер">
           <div class="tabs-block" data-player-anime-id="667">
             <div data-player-slot="0" data-player-title="Плеер Kodik"></div>
           </div>
@@ -44,6 +48,22 @@ class RelayChainTest {
 
     /** Страницы: кадр плеера отдаётся страницей, реле — коротким ответом. */
     private fun pages() = mapOf(player to KodikFixture.pageHtml)
+
+    @Test
+    fun `картинки и скрипты не тратят потолок запросов`() = runBlocking {
+        val result = Chain.collect(
+            spec = spec(),
+            html = card,
+            pageUrl = pageUrl,
+            dubbing = "",
+            budget = Budget(4),
+            post = { _, _, _ -> KodikFixture.ftorJson },
+            text = { if (it == relayUrl) relay else null },
+            fetch = { pages()[it] },
+        )
+
+        result.links.size shouldBe 3
+    }
 
     @Test
     fun `реле приводит к ссылкам плеера`() = runBlocking {
