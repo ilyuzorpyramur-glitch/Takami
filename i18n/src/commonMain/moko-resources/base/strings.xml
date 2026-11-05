@@ -2091,4 +2091,5 @@
     <string name="swipe_empty_failed_body">Something went wrong while loading</string>
     <string name="swipe_refresh">Refresh</string>
     <string name="swipe_retry">Retry</string>
+    <string name="swipe_find_manual">Find manually</string>
 </resources>

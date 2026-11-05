@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.discovery
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +48,7 @@ internal fun SwipeCard(
     onHide: () -> Unit,
     onLater: () -> Unit,
     onOpen: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -60,6 +62,11 @@ internal fun SwipeCard(
             .graphicsLayer {
                 translationX = offset
                 rotationZ = (offset / 40f).coerceIn(-12f, 12f)
+            }
+            .pointerInput(item.id) {
+                // Тап и долгое нажатие: жест перетаскивания забирает движение,
+                // а неподвижное касание доходит сюда.
+                detectTapGestures(onTap = { onOpen() }, onLongPress = { onLongClick() })
             }
             .pointerInput(item.id) {
                 detectHorizontalDragGestures(

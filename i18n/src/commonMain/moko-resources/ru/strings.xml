@@ -1884,4 +1884,5 @@
     <string name="swipe_empty_failed_body">При загрузке подборки произошла ошибка</string>
     <string name="swipe_refresh">Обновить</string>
     <string name="swipe_retry">Повторить</string>
+    <string name="swipe_find_manual">Найти вручную</string>
 </resources>

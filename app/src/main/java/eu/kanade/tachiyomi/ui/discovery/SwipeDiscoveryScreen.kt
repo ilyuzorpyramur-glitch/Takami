@@ -25,6 +25,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import eu.kanade.presentation.util.Screen
+import eu.kanade.tachiyomi.ui.browse.anime.source.globalsearch.GlobalAnimeSearchScreen
+import eu.kanade.tachiyomi.ui.browse.manga.source.globalsearch.GlobalMangaSearchScreen
+import eu.kanade.tachiyomi.ui.browse.novel.source.globalsearch.GlobalNovelSearchScreen
+import eu.kanade.tachiyomi.ui.entries.anime.AnimeScreen
+import eu.kanade.tachiyomi.ui.entries.manga.MangaScreen
+import eu.kanade.tachiyomi.ui.entries.novel.NovelScreen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import kotlinx.coroutines.delay
@@ -62,6 +68,32 @@ class SwipeDiscoveryScreen(private val mediaKey: String) : Screen(), Serializabl
                 model.markExposed(current)
             }
         }
+        LaunchedEffect(state.pendingOpen) {
+            val open = state.pendingOpen ?: return@LaunchedEffect
+            model.consumeOpen()
+            navigator.push(
+                when (open.mediaType) {
+                    DiscoveryMediaType.ANIME -> AnimeScreen(open.entryId)
+                    DiscoveryMediaType.MANGA -> MangaScreen(open.entryId)
+                    DiscoveryMediaType.NOVEL -> NovelScreen(open.entryId)
+                },
+            )
+        }
+
+        val preview = state.preview
+        if (preview != null) {
+            DiscoveryPreviewSheet(
+                item = preview,
+                meta = state.previewMeta,
+                isMetaLoading = state.previewLoading,
+                coverMediaType = preview.mediaType,
+                onDismiss = { model.dismissPreview() },
+                onAdd = { model.dismissPreview(); model.watchLater(preview) },
+                onFind = { model.dismissPreview(); navigator.push(globalSearch(preview)) },
+                onHide = { model.dismissPreview(); model.hide(preview) },
+            )
+        }
+
         LaunchedEffect(state.hiddenSnackbarTitle) {
             if (state.hiddenSnackbarTitle != null) {
                 delay(4_000)
@@ -94,7 +126,8 @@ class SwipeDiscoveryScreen(private val mediaKey: String) : Screen(), Serializabl
                             item = current,
                             onHide = { model.hide(current) },
                             onLater = { model.watchLater(current) },
-                            onOpen = { model.recordClick(current); model.preview(current) },
+                            onOpen = { model.open(current) },
+                            onLongClick = { model.openPreview(current) },
                         )
                         else -> SwipeEmptyState(
                             empty = state.empty,
@@ -127,6 +160,15 @@ class SwipeDiscoveryScreen(private val mediaKey: String) : Screen(), Serializabl
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
+                        TextButton(
+                            onClick = {
+                                val item = current ?: return@TextButton
+                                model.dismissAddResult()
+                                navigator.push(globalSearch(item))
+                            },
+                        ) {
+                            Text(stringResource(MR.strings.swipe_find_manual))
+                        }
                         TextButton(onClick = { model.dismissAddResult() }) {
                             Text(stringResource(MR.strings.swipe_close))
                         }
@@ -182,3 +224,11 @@ private fun SwipeEmptyState(
         }
     }
 }
+
+/** Ручной поиск по названию: честный путь, когда привязки к источнику нет. */
+private fun globalSearch(item: tachiyomi.domain.discovery.model.DiscoverySuggestion): Screen =
+    when (item.mediaType) {
+        tachiyomi.domain.discovery.model.DiscoveryMediaType.ANIME -> GlobalAnimeSearchScreen(item.title)
+        tachiyomi.domain.discovery.model.DiscoveryMediaType.MANGA -> GlobalMangaSearchScreen(item.title)
+        tachiyomi.domain.discovery.model.DiscoveryMediaType.NOVEL -> GlobalNovelSearchScreen(item.title)
+    }

@@ -16,6 +16,7 @@ import eu.kanade.domain.discovery.service.DiscoveryPreferences
 import eu.kanade.tachiyomi.data.discovery.DiscoveryCandidatePolicy
 import eu.kanade.tachiyomi.data.discovery.DiscoveryLibraryAdder
 import eu.kanade.tachiyomi.data.discovery.DiscoveryStackSelector
+import eu.kanade.tachiyomi.data.discovery.DiscoveryTrendingSource
 import eu.kanade.tachiyomi.data.discovery.TasteSignalRecorder
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
@@ -33,6 +34,9 @@ import tachiyomi.core.common.i18n.stringResource as contextStringResource
 /** Что показать вместо карточки, когда стек пуст. */
 internal enum class SwipeEmpty { NONE, LOADING, DONE, OFFLINE, FAILED }
 
+/** Что открыть после разрешения привязки: тайтл уже в локальной базе. */
+internal data class PendingOpen(val mediaType: DiscoveryMediaType, val entryId: Long)
+
 internal data class SwipeUiState(
     val mediaType: DiscoveryMediaType = DiscoveryMediaType.ANIME,
     val stack: SwipeStack = SwipeStack(),
@@ -42,6 +46,9 @@ internal data class SwipeUiState(
     val addFailed: Boolean = false,
     val adding: Boolean = false,
     val preview: DiscoverySuggestion? = null,
+    val previewMeta: DiscoveryMeta? = null,
+    val previewLoading: Boolean = false,
+    val pendingOpen: PendingOpen? = null,
 ) {
     val current: DiscoverySuggestion? get() = stack.current
 }
@@ -58,6 +65,8 @@ internal class SwipeDiscoveryScreenModel(
     private val repository: DiscoveryRepository = Injekt.get(),
     private val preferences: DiscoveryPreferences = Injekt.get(),
     private val adder: DiscoveryLibraryAdder = Injekt.get(),
+    private val trending: DiscoveryTrendingSource = Injekt.get(),
+    private val resolver: DiscoveryDirectOpenResolver = DiscoveryDirectOpenResolver(),
 ) : StateScreenModel<SwipeUiState>(SwipeUiState(mediaType = initialMedia)) {
 
     private val dismissed = mutableSetOf<String>()
@@ -165,7 +174,29 @@ internal class SwipeDiscoveryScreenModel(
         }
     }
 
-    fun preview(item: DiscoverySuggestion?) = mutableState.update { it.copy(preview = item) }
+    /** Тап: привязка есть — открываем тайтл, иначе честная шторка предпросмотра. */
+    fun open(item: DiscoverySuggestion) {
+        recordClick(item)
+        screenModelScope.launchIO {
+            val entryId = runCatching { resolver.resolveEntryId(item) }.getOrNull()
+            if (entryId != null) {
+                mutableState.update { it.copy(pendingOpen = PendingOpen(item.mediaType, entryId)) }
+                return@launchIO
+            }
+            mutableState.update { it.copy(preview = item, previewMeta = null, previewLoading = true) }
+            val meta = runCatching { trending.fetchMeta(item.title, item.mediaType) }.getOrNull()
+            mutableState.update { it.copy(previewMeta = meta, previewLoading = false) }
+        }
+    }
+
+    /** Долгое нажатие: шторка без выдуманной меты. */
+    fun openPreview(item: DiscoverySuggestion) =
+        mutableState.update { it.copy(preview = item, previewMeta = null, previewLoading = false) }
+
+    fun dismissPreview() =
+        mutableState.update { it.copy(preview = null, previewMeta = null, previewLoading = false) }
+
+    fun consumeOpen() = mutableState.update { it.copy(pendingOpen = null) }
 
     fun advance() = mutableState.update { it.copy(stack = it.stack.advance()) }
 
