@@ -128,6 +128,10 @@ internal fun buildPopularQuery(format: String?, hasStatuses: Boolean): String {
     """.trimIndent()
 }
 
+fun parseTrendingPage(page: JsonObject, seasonLabel: String? = null): List<DiscoveryTrendingItem> =
+    (((page["data"] as? JsonObject)?.get("Page") as? JsonObject)?.get("media") as? JsonArray)
+        ?.mapNotNull { it as? JsonObject }
+
 open class AniListTrendingSource(
     private val clientProvider: () -> okhttp3.OkHttpClient = { Injekt.get<NetworkHelper>().client },
     private val jsonProvider: () -> Json = { Injekt.get() }, // lazy: конструктор не требует Injekt-реестр (юнит-тесты)
