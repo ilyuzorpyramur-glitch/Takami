@@ -13,12 +13,18 @@ import org.junit.jupiter.api.Test
  * Цепочка с реле и Kodik на подставных ответах: без сети.
  *
  * Проверяется весь путь, который раньше обрывался на «ссылок нет»:
- * разметка без кадра плеера, ответ реле, страница плеера и запрос за
- * ссылками.
+ * разметка без кадра плеера, ответ реле (это JSON, а не страница),
+ * страница плеера и запрос за ссылками.
  */
 class RelayChainTest {
 
     private val pageUrl = "https://site.example/667-title.html"
+
+    private val relayUrl = "https://site.example/engine/ajax/controller.php?mod=player&id=667&slot=0"
+
+    private val player = "https://player.example/serial/1/abc/720p"
+
+    private val relay = """{"status":true,"data":{"name":"Kodik","src":"$player"}}"""
 
     private val card = """
         <html><body>
@@ -36,25 +42,20 @@ class RelayChainTest {
         video = VideoSpec(iframeDepth = 2, maxPlayers = 8, maxRequests = 16),
     )
 
-    private val player = "https://player.example/serial/1/abc/720p"
-
-    private val relay = """{"status":true,"data":{"name":"Kodik","src":"$player"}}"""
+    /** Страницы: кадр плеера отдаётся страницей, реле — коротким ответом. */
+    private fun pages() = mapOf(player to KodikFixture.pageHtml)
 
     @Test
     fun `реле приводит к ссылкам плеера`() = runBlocking {
-        val pages = mapOf(
-            "https://site.example/engine/ajax/controller.php?mod=player&id=667&slot=0" to relay,
-            player to KodikFixture.pageHtml,
-        )
-
         val result = Chain.collect(
             spec = spec(),
             html = card,
             pageUrl = pageUrl,
             dubbing = "",
             budget = Budget(16),
-            fetch = { pages[it] },
             post = { _, _, _ -> KodikFixture.ftorJson },
+            text = { if (it == relayUrl) relay else null },
+            fetch = { pages()[it] },
         )
 
         result.links.map { it.quality }.shouldContainExactly(listOf("360p", "480p", "720p"))
@@ -63,20 +64,32 @@ class RelayChainTest {
     }
 
     @Test
-    fun `без ответа на запрос ссылок нет, но и падения нет`() = runBlocking {
-        val pages = mapOf(
-            "https://site.example/engine/ajax/controller.php?mod=player&id=667&slot=0" to relay,
-            player to KodikFixture.pageHtml,
-        )
-
+    fun `без ответа реле ссылок нет, но и падения нет`() = runBlocking {
         val result = Chain.collect(
             spec = spec(),
             html = card,
             pageUrl = pageUrl,
             dubbing = "",
             budget = Budget(16),
-            fetch = { pages[it] },
+            post = { _, _, _ -> KodikFixture.ftorJson },
+            text = { null },
+            fetch = { pages()[it] },
+        )
+
+        result.links shouldBe emptyList()
+    }
+
+    @Test
+    fun `без ответа на запрос ссылок нет, но и падения нет`() = runBlocking {
+        val result = Chain.collect(
+            spec = spec(),
+            html = card,
+            pageUrl = pageUrl,
+            dubbing = "",
+            budget = Budget(16),
             post = { _, _, _ -> null },
+            text = { if (it == relayUrl) relay else null },
+            fetch = { pages()[it] },
         )
 
         result.links shouldBe emptyList()
@@ -84,19 +97,15 @@ class RelayChainTest {
 
     @Test
     fun `потолок запросов останавливает обход`() = runBlocking {
-        val pages = mapOf(
-            "https://site.example/engine/ajax/controller.php?mod=player&id=667&slot=0" to relay,
-            player to KodikFixture.pageHtml,
-        )
-
         val result = Chain.collect(
             spec = spec(),
             html = card,
             pageUrl = pageUrl,
             dubbing = "",
             budget = Budget(1),
-            fetch = { pages[it] },
             post = { _, _, _ -> KodikFixture.ftorJson },
+            text = { if (it == relayUrl) relay else null },
+            fetch = { pages()[it] },
         )
 
         result.links shouldBe emptyList()

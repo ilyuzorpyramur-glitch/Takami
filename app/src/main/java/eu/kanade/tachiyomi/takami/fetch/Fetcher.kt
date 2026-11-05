@@ -275,6 +275,32 @@ class Fetcher internal constructor(
     }
 
     /**
+     * Ответ как текст, без ворот HTML.
+     *
+     * Служебные ответы плееров — это JSON: ворота считают его не той
+     * страницей и отбрасывают, а разобрать его нужно. Кодировку берём у
+     * ответа, размер уже ограничен при чтении.
+     */
+    suspend fun getText(url: String, referer: String? = null): String {
+        currentCoroutineContext().ensureActive()
+        return textOf(send(url, referer, FetchPriority.INTERACTIVE))
+    }
+
+    /** То же для запроса с телом: ссылки плеера приходят ответом на POST. */
+    suspend fun postText(url: String, body: String, referer: String? = null): String {
+        currentCoroutineContext().ensureActive()
+        return textOf(send(url, referer, FetchPriority.INTERACTIVE, post = body))
+    }
+
+    /** Текст ответа: код проверяем, пустое тело — ошибка, ворота не зовём. */
+    private fun textOf(raw: Raw): String {
+        if (raw.code !in 200..299) throw HttpStatusError(raw.code, raw.url)
+        if (raw.bytes.isEmpty()) throw NotHtmlError(raw.url, raw.contentType.orEmpty())
+        val charset = CharsetSniffer.detect(raw.contentType, raw.bytes)
+        return String(raw.bytes, charset).removePrefix("\uFEFF")
+    }
+
+    /**
       * Первые байты медиа: проверяем, что ссылка отдаёт поток, а не
       * страницу.
       * Читаем не больше [FetchLimits.PROBE_BYTES]: сервер вправе
