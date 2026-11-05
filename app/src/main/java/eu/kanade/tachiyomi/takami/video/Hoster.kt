@@ -111,7 +111,7 @@ object Chain {
         // Реле плеера идёт первым: кадр собирается скриптом, в разметке его
         // нет, а потолок запросов общий — иначе до реле очередь не дойдёт.
         // Ответ реле — JSON, а не страница: его читаем отдельно.
-        val relays = PlayerRelay.endpoints(html, pageUrl)
+        val relays = relaysOf(html, pageUrl, budget, fetch)
         relays.forEach { queue.addLast(it to 0) }
         Drafts.candidates(spec, html, pageUrl).forEach { queue.addLast(it to 0) }
         while (queue.isNotEmpty()) {
@@ -160,6 +160,26 @@ object Chain {
             Drafts.candidates(spec, answer, url).forEach { queue.addLast(it to depth + 1) }
         }
         return ChainResult(Quality.byUrl(links).distinctBy { it.url }, blocked)
+    }
+
+    /**
+     * Слоты реле: с переданной разметки, а если она куском — со страницы.
+     *
+     * Таб озвучки приходит фрагментом: ни номера тайтла, ни служебного
+     * адреса в нём нет. Тогда страницу берём целиком — один запрос, он
+     * всё равно лежит в памяти сетевого слоя.
+     */
+    private suspend fun relaysOf(
+        html: String,
+        pageUrl: String,
+        budget: Budget,
+        fetch: suspend (String) -> String?,
+    ): List<String> {
+        val found = PlayerRelay.endpoints(html, pageUrl)
+        if (found.isNotEmpty() || html.contains("<html", ignoreCase = true)) return found
+        if (pageUrl.isBlank() || !budget.take()) return found
+        val page = fetch(pageUrl) ?: return found
+        return PlayerRelay.endpoints(page, pageUrl)
     }
 
     /** Запрос с телом через сетевой слой приложения: лимиты, паузы, повторы. */

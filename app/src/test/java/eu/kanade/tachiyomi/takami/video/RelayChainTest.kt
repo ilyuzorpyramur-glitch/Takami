@@ -66,6 +66,25 @@ class RelayChainTest {
     }
 
     @Test
+    fun `кусок разметки не мешает найти реле`() = runBlocking {
+        // Таб озвучки приходит фрагментом: кадра плеера в нём нет.
+        val fragment = """<div class="tab"><a href="/667-e2.html">2 серия</a></div>"""
+
+        val result = Chain.collect(
+            spec = spec(),
+            html = fragment,
+            pageUrl = pageUrl,
+            dubbing = "",
+            budget = Budget(16),
+            post = { _, _, _ -> KodikFixture.ftorJson },
+            text = { if (it == relayUrl) relay else null },
+            fetch = { if (it == pageUrl) card else pages()[it] },
+        )
+
+        result.links.size shouldBe 3
+    }
+
+    @Test
     fun `реле приводит к ссылкам плеера`() = runBlocking {
         val result = Chain.collect(
             spec = spec(),
