@@ -196,13 +196,21 @@ object Chain {
 
     /** Запрос с телом через сетевой слой приложения: лимиты, паузы, повторы. */
     private fun appPost(): RelayPost = { url, body, referer ->
-        runCatching { Fetcher.get().postText(url, body, referer) }.getOrNull()
+        runCatching { Fetcher.get().postText(url, body, referer) }
+            .onFailure { logcat(LogPriority.DEBUG) { "Takami chain: запрос не прошёл " + why(it) } }
+            .getOrNull()
     }
 
     /** Чтение ответа без ворот HTML: служебные ответы плееров — это JSON. */
     private fun appText(): RelayText = { url ->
-        runCatching { Fetcher.get().getText(url) }.getOrNull()
+        runCatching { Fetcher.get().getText(url) }
+            .onFailure { logcat(LogPriority.DEBUG) { "Takami chain: чтение не прошло " + why(it) } }
+            .getOrNull()
     }
+
+    /** Короткая причина отказа: тип и текст, без адресов и заголовков. */
+    private fun why(error: Throwable): String =
+        error.javaClass.simpleName + ": " + error.message.orEmpty().take(80)
 
     /** Карта от плеера по шаблону из спеки: отдельный запрос, один раз. */
     private suspend fun mapFrom(
