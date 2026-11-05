@@ -314,6 +314,26 @@ class Fetcher internal constructor(
     ): String {
         currentCoroutineContext().ensureActive()
         val host = hostOf(url)
+        return try {
+            probeOnce(url, referer, headers, host)
+        } catch (e: Exception) {
+            // Причина отказа важнее кода: без неё «поток не играет» —
+            // догадка, а не факт.
+            logcat(LogPriority.DEBUG) {
+                "Takami probe: " + host + " отказ " +
+                    e.javaClass.simpleName + ": " + e.message.orEmpty().take(60)
+            }
+            throw e
+        }
+    }
+
+    /** Одна проба потока: первые байты и код ответа. */
+    private suspend fun probeOnce(
+        url: String,
+        referer: String?,
+        headers: Map<String, String>,
+        host: String,
+    ): String {
         return guard.run(host) {
             currentCoroutineContext().ensureActive()
             val builder = request(url, referer)
@@ -331,7 +351,12 @@ class Fetcher internal constructor(
                 while (buffer.size < FetchLimits.PROBE_BYTES) {
                     if (source.read(buffer, FetchLimits.PROBE_BYTES - buffer.size) == -1L) break
                 }
-                buffer.readByteArray().toString(Charsets.ISO_8859_1)
+                val head = buffer.readByteArray().toString(Charsets.ISO_8859_1)
+                logcat(LogPriority.DEBUG) {
+                    "Takami probe: " + host + " -> " + code + " " +
+                        head.take(12).replace("\n", " ")
+                }
+                head
             }
         }
     }
