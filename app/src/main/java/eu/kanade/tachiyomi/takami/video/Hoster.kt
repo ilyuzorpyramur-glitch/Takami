@@ -7,7 +7,9 @@ import eu.kanade.tachiyomi.takami.video.kodik.KodikChain
 import eu.kanade.tachiyomi.takami.video.kodik.RelayPost
 import eu.kanade.tachiyomi.takami.video.kodik.RelayText
 import eu.kanade.tachiyomi.takami.video.relay.PlayerRelay
+import logcat.LogPriority
 import org.jsoup.Jsoup
+import tachiyomi.core.common.util.system.logcat
 
 /**
  * Плеер, описанный в спеке.
@@ -114,6 +116,10 @@ object Chain {
         val relays = relaysOf(html, pageUrl, budget, fetch)
         relays.forEach { queue.addLast(it to 0) }
         Drafts.candidates(spec, html, pageUrl).forEach { queue.addLast(it to 0) }
+        logcat(LogPriority.DEBUG) {
+            "Takami chain: страница=" + html.length + " реле=" + relays.size +
+                " очередь=" + queue.size + " потолок=" + spec.video.maxRequests
+        }
         while (queue.isNotEmpty()) {
             val (url, depth) = queue.removeFirst()
             if (!budget.take()) break
@@ -125,11 +131,13 @@ object Chain {
             }
             val answer = if (url in relays) text(url) else fetch(url)
             if (answer.isNullOrBlank()) {
+                logcat(LogPriority.DEBUG) { "Takami chain: пустой ответ " + short(url) }
                 blocked = true
                 continue
             }
             // Ответ реле — адрес кадра плеера, а не страница: идём по нему.
             val relayed = PlayerRelay.playerOf(answer)
+            logcat(LogPriority.DEBUG) { "Takami chain: шаг " + short(url) + " плеер=" + (relayed != null) }
             if (relayed != null) {
                 if (depth < spec.video.iframeDepth) queue.addLast(relayed to depth + 1)
                 continue
@@ -137,6 +145,7 @@ object Chain {
             // Плеер Kodik ссылок в разметке не держит: только ответ на запрос.
             if (KodikChain.looks(answer)) {
                 val kodik = KodikChain.links(answer, url, dubbing, budget, post)
+                logcat(LogPriority.DEBUG) { "Takami chain: плеер Kodik, ссылок " + kodik.size }
                 if (kodik.isNotEmpty()) {
                     links += kodik
                     continue
@@ -181,6 +190,9 @@ object Chain {
         val page = fetch(pageUrl) ?: return found
         return PlayerRelay.endpoints(page, pageUrl)
     }
+
+    /** Адрес без строки запроса: в журнал идут только путь и домен. */
+    private fun short(url: String): String = url.substringBefore('?').takeLast(80)
 
     /** Запрос с телом через сетевой слой приложения: лимиты, паузы, повторы. */
     private fun appPost(): RelayPost = { url, body, referer ->
