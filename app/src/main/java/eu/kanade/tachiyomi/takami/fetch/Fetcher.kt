@@ -333,6 +333,7 @@ class Fetcher internal constructor(
         referer: String?,
         headers: Map<String, String>,
         host: String,
+        depth: Int = 0,
     ): String {
         return guard.run(host) {
             currentCoroutineContext().ensureActive()
@@ -345,6 +346,15 @@ class Fetcher internal constructor(
             val response = execute(request, host)
             response.use { received ->
                 val code = received.code
+                // Поток часто отвечает переадресацией: один переход —
+                // отдельный запрос под лимитами домена.
+                val next = received.header("Location")
+                if (code in REDIRECTS && depth < 1 && !next.isNullOrBlank()) {
+                    val target = received.request.url.resolve(next)?.toString().orEmpty()
+                    if (target.isNotEmpty()) {
+                        return@use probeOnce(target, url, headers, hostOf(target), depth + 1)
+                    }
+                }
                 if (code !in 200..299) throw HttpStatusError(code, url)
                 val source = received.body.source()
                 val buffer = Buffer()
