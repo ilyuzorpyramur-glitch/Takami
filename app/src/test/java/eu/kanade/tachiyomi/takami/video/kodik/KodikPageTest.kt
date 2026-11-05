@@ -39,6 +39,17 @@ class KodikPageTest {
     }
 
     @Test
+    fun `без списка переводов озвучка берётся из отметки сезона`() {
+        // У страницы одной серии списка переводов может не быть: студия
+        // названа в отметке сезона.
+        val short = html.replace("serial-translations-box", "нет-переводов")
+        val page = KodikPlayer.parse(short) ?: error("страница не разобралась")
+
+        page.translations.size shouldBe 0
+        page.current shouldBe "AnimeVost"
+    }
+
+    @Test
     fun `чужая страница не считается плеером`() {
         KodikPlayer.parse("<html><body>обычная страница</body></html>") shouldBe null
         KodikPlayer.looks("<html><body>обычная страница</body></html>") shouldBe false

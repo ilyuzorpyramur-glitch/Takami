@@ -32,8 +32,10 @@ object KodikChain {
     fun axes(html: String): VideoAxes {
         val page = KodikPlayer.parse(html) ?: return VideoAxes()
         val current = page.translations.firstOrNull { it.title == page.current }
+        val titles = page.translations.map { it.title }.filter { it.isNotBlank() }
         return VideoAxes(
-            dubbings = page.translations.map { it.title }.filter { it.isNotBlank() },
+            // Списка переводов нет — называем только открытую озвучку.
+            dubbings = if (titles.isEmpty() && page.current.isNotBlank()) listOf(page.current) else titles,
             episodes = current?.episodes ?: page.series.size,
             current = page.current,
         )
