@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.takami.video.kodik
 
 import eu.kanade.tachiyomi.takami.video.Budget
 import eu.kanade.tachiyomi.takami.video.QualityLink
+import eu.kanade.tachiyomi.takami.video.VideoAxes
 
 /** Запрос с телом: плеер отдаёт ссылки только так. */
 typealias RelayPost = suspend (url: String, body: String, referer: String?) -> String?
@@ -21,6 +22,22 @@ object KodikChain {
 
     /** Это страница Kodik: её разбираем и спрашиваем ссылки. */
     fun looks(html: String): Boolean = KodikPlayer.looks(html)
+
+    /**
+     * Оси страницы плеера: названия переводов и число серий перевода.
+     *
+     * Число серий берём у открытого перевода: у разных студий их бывает
+     * разное количество, и одно общее число соврало бы.
+     */
+    fun axes(html: String): VideoAxes {
+        val page = KodikPlayer.parse(html) ?: return VideoAxes()
+        val current = page.translations.firstOrNull { it.title == page.current }
+        return VideoAxes(
+            dubbings = page.translations.map { it.title }.filter { it.isNotBlank() },
+            episodes = current?.episodes ?: page.series.size,
+            current = page.current,
+        )
+    }
 
     /**
      * Ссылки открытой серии.

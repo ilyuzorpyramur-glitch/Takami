@@ -100,6 +100,9 @@ class RelayChainTest {
         result.links.map { it.quality }.shouldContainExactly(listOf("360p", "480p", "720p"))
         result.links.all { it.dubbing == "AnimeVost" } shouldBe true
         result.blocked shouldBe false
+        result.axes.dubbings.size shouldBe 8
+        result.axes.current shouldBe "AnimeVost"
+        result.axes.episodes shouldBe 6
     }
 
     @Test

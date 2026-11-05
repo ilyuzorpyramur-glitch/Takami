@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.takami.fetch.FetchedPage
 import eu.kanade.tachiyomi.takami.fetch.Fetcher
 import eu.kanade.tachiyomi.takami.video.Dubbing
 import eu.kanade.tachiyomi.takami.video.Budget
+import eu.kanade.tachiyomi.takami.video.VideoAxes
 import eu.kanade.tachiyomi.takami.video.config.MediaMiner
 import eu.kanade.tachiyomi.takami.video.Chain
 import eu.kanade.tachiyomi.takami.video.DubbingTrack
@@ -247,9 +248,11 @@ class SpecEngine(
         }
         val found = mutableListOf<QualityLink>()
         var blocked = false
+        var axes = VideoAxes()
         for (track in tracks.ifEmpty { listOf(Track("", page.html)) }) {
             val result = Chain.collect(spec, track.html, page.url, track.name, budget, fetch)
             found += result.links
+            axes = axes.plus(result.axes)
             blocked = blocked || result.blocked
         }
         // Слой 1 — статика. Пусто — слой 2, шахта конфига на уже загруженной странице.
@@ -295,6 +298,7 @@ class SpecEngine(
             blocked = blocked && streams.isEmpty(),
             layer = if (streams.isEmpty()) "" else layer,
             stopReason = sniff.stopReason,
+            axes = axes,
         )
     }
 
@@ -499,4 +503,6 @@ data class LinkReport(
     val layer: String = "",
     /** Почему снимок остановился; пусто — снимок не делался. */
     val stopReason: String = "",
+    /** Оси, которые назвал сам плеер: озвучки и число серий. */
+    val axes: VideoAxes = VideoAxes(),
 )

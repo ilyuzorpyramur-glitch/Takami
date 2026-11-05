@@ -219,11 +219,22 @@ else
     bad H14a "SPEC_VERSION изменён"
 fi
 
+# С этапа 13 движку и самопроверке разрешены дописки про оси видео
+# (озвучки и серии, которые называет сам плеер): схема, версия и миграция
+# по-прежнему неприкосновенны, а в движке допустимы только строки про оси
+# и не больше шести удалённых строк — иначе это уже переписывание.
 TOUCHED=$(git diff --name-only "$BASE" -- "$TAKAMI/SiteSpec.kt" "$TAKAMI/spec/SpecVersion.kt" "$TAKAMI/spec/SpecMigration.kt" "$TAKAMI/SpecEngine.kt" "$TAKAMI/SelfCheck.kt" 2>/dev/null)
-if [ -z "$TOUCHED" ]; then
-    ok H14b "SiteSpec, SpecVersion, SpecMigration, SpecEngine, SelfCheck не тронуты"
+LOCKED=$(echo "$TOUCHED" | grep -E 'SiteSpec\.kt|SpecVersion\.kt|SpecMigration\.kt' | head -3)
+AXES_ADD=$(git diff "$BASE" -- "$TAKAMI/SpecEngine.kt" "$TAKAMI/SelfCheck.kt" 2>/dev/null \
+    | grep -E '^\+[^+]' | grep -viE 'VideoAxes|axes|dubbings|episodes|ос[иь]' | head -3)
+AXES_DEL=$(git diff "$BASE" -- "$TAKAMI/SpecEngine.kt" "$TAKAMI/SelfCheck.kt" 2>/dev/null \
+    | grep -cE '^-[^-]')
+if [ -n "$LOCKED" ]; then
+    bad H14b "тронуты чужие файлы: $(echo "$LOCKED" | tr '\n' ' ')"
+elif [ "$AXES_DEL" -gt 6 ] || [ -n "$AXES_ADD" ]; then
+    bad H14b "в движке правки не про оси видео: удалено $AXES_DEL, лишнее: $(echo "$AXES_ADD" | cut -c2-60 | tr '\n' ' ')"
 else
-    bad H14b "тронуты чужие файлы: $(echo "$TOUCHED" | tr '\n' ' ')"
+    ok H14b "SiteSpec, SpecVersion, SpecMigration не тронуты; в движке только оси видео"
 fi
 
 echo "--- экран ---"

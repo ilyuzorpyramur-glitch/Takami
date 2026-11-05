@@ -127,7 +127,7 @@ class SelfCheck(private val engine: SpecEngine = SpecEngine()) {
             streams = found.streams
             qualities = streams.map { it.quality }.filter { it.isNotBlank() }.distinct()
             // Озвучки берём из ссылок: в разметке они есть не всегда.
-            dubbings = Dubbing.names(streams.map { it.dubbing })
+            dubbings = found.axes.dubbings.ifEmpty { Dubbing.names(streams.map { it.dubbing }) }
             hoster = hosterOf(spec, streams)
             val playable = streams.firstOrNull()
             // Мастер HLS без заголовков окна отвечает отказом: проверяем как плеер.
