@@ -24,9 +24,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
-import cafe.adriel.voyager.core.screen.Screen as VoyagerScreenInterface
 import kotlinx.coroutines.delay
 import tachiyomi.domain.discovery.model.DiscoveryMediaType
 import tachiyomi.i18n.MR
@@ -47,7 +47,7 @@ class SwipeDiscoveryScreen(private val mediaKey: String) : Screen(), Serializabl
     @Composable
     override fun Content() {
         val context = LocalContext.current
-        val navigator = LocalNavigator.current ?: return
+        val navigator = LocalNavigator.currentOrThrow
         val media = remember(mediaKey) {
             DiscoveryMediaType.fromKey(mediaKey) ?: DiscoveryMediaType.ANIME
         }
