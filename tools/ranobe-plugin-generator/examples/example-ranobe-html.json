@@ -1,0 +1,34 @@
+{
+  "id": "example-html.ranobe",
+  "name": "Example Ranobe HTML",
+  "site": "https://example.org",
+  "lang": "ru",
+  "version": 1,
+  "listings": {
+    "popular": {
+      "path": "/catalog?page={page}",
+      "item": ".catalog-card",
+      "name": ".card-title",
+      "link": ".card-title@href",
+      "cover": "img.cover@src"
+    }
+  },
+  "novel": {
+    "name": "h1.title",
+    "author": ".author",
+    "cover": ".poster img@src",
+    "description": ".summary",
+    "status": ".status",
+    "tags": ".tags a",
+    "chapters": {
+      "item": ".chapter-item",
+      "name": ".chapter-name",
+      "path": "a@href"
+    }
+  },
+  "chapter": {
+    "content": ".chapter-content",
+    "mode": "html",
+    "remove": [".ad"]
+  }
+}
