@@ -97,7 +97,7 @@ for f in MangaMarkup MangaStore MangaSourceId; do
 done
 has "$M/MangaMarkup.kt" 'JS_ONLY' "M30 браузерная сборка отличается от пустого каталога"
 has "$M/MangaMarkup.kt" 'ANTI_BOT' "M31 проверка браузера отдельным итогом"
-has "$M/MangaCheck.kt" 'JS_ONLY("js_only")' "M32 итог проверки знает оболочку"
+has "$M/MangaCheck.kt" 'JS_ONLY\("js_only"\)' "M32 итог проверки знает оболочку"
 has "$M/MangaForge.kt" 'MangaMarkup.detect' "M33 кузница смотрит, что отдал сайт"
 has "$M/MangaStore.kt" 'fun save\(spec: MangaSpec\)' "M34 спека сохраняется"
 has "$M/MangaStore.kt" 'fun load\(host: String\)' "M35 спека читается"
