@@ -1,9 +1,11 @@
 package eu.kanade.tachiyomi.ui.takami
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.coroutineScope
 import eu.kanade.tachiyomi.takami.manga.MangaForgeSources
 import eu.kanade.tachiyomi.takami.manga.MangaSpec
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,29 +20,27 @@ data class MangaForgeState(
 
 class MangaForgeScreenModel : ScreenModel {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
     private val _state = MutableStateFlow(MangaForgeState())
     val state: StateFlow<MangaForgeState> = _state.asStateFlow()
 
     val specs: StateFlow<List<MangaSpec>> = MangaForgeSources.specs
 
-    /* Сборка по ссылке. Отказ
-    /* показывается как есть, без общих
-    /* слов. */
+    /** Сборка по ссылке. Отказ показывается как есть. */
     fun build(link: String) {
         val url = link.trim()
         if (url.isEmpty() || _state.value.busy) return
         _state.value = MangaForgeState(busy = true)
-        coroutineScope.launch {
+        scope.launch {
             val made = MangaForgeSources.install(url)
-            val failure = MangaForgeSources.failure.value
-            _state.value = MangaForgeState(
-                done = made,
-                error = failure?.let { it.reason + ": " + it.message },
-            )
+            val fail = MangaForgeSources.failure.value
+            val text = if (fail == null) null else fail.reason + ": " + fail.message
+            _state.value = MangaForgeState(done = made, error = text)
         }
     }
 
     fun remove(host: String) {
-        coroutineScope.launch { MangaForgeSources.remove(host) }
+        scope.launch { MangaForgeSources.remove(host) }
     }
 }

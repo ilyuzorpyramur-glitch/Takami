@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -37,7 +38,7 @@ import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.takami.manga.MangaForgeStrings
 
 /**
- * Мастер манга-источника: ссылка → проверка → сохранение.
+ * Мастер манга-источника: ссылка — проверка — сохранение.
  *
  * Экран ничего не обещает заранее: показывает либо добавленный
  * источник, либо причину, по которой сайт не подошёл.
@@ -91,7 +92,10 @@ class MangaForgeScreen : Screen() {
                     Text(MangaForgeStrings.BUILD)
                 }
                 if (state.busy) {
-                    Row(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         CircularProgressIndicator()
                         Text(MangaForgeStrings.BUILDING)
                     }
@@ -105,7 +109,10 @@ class MangaForgeScreen : Screen() {
                             modifier = Modifier.padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Text(MangaForgeStrings.DONE, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                text = MangaForgeStrings.DONE,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
                             Text(spec.name)
                             Text(spec.host)
                         }
@@ -117,11 +124,14 @@ class MangaForgeScreen : Screen() {
                     specs.forEach { spec ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(spec.name)
-                                Text(spec.host, style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    text = spec.host,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
                             }
                             TextButton(onClick = { model.remove(spec.host) }) {
                                 Text(MangaForgeStrings.REMOVE)

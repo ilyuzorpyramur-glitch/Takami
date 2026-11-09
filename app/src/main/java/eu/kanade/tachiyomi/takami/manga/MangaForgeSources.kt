@@ -13,8 +13,8 @@ import java.io.File
 /**
  * Реестр манга-спек на устройстве.
  *
- * Хранит спеки в filesDir, отдаёт готовые источники менеджеру и
- * принимает новые по ссылке. Ничего не отправляет наружу.
+ * Хранит спеки в filesDir, отдаёт источники менеджеру и принимает
+ * новые по ссылке. Ничего не отправляет наружу.
  */
 object MangaForgeSources {
 
@@ -22,31 +22,36 @@ object MangaForgeSources {
 
     private var store: MangaStore? = null
     private val engine = MangaEngine()
-    private val forge = MangaForge(engine)
+    private val forge = MangaForge()
 
     private val _specs = MutableStateFlow<List<MangaSpec>>(emptyList())
+
+    /** Спеки, которые сейчас установлены. */
     val specs: StateFlow<List<MangaSpec>> = _specs.asStateFlow()
 
-    /* Готовая спека последней удачной
-    /* сборки: экран показывает итог. */
     private val _ready = MutableStateFlow<MangaSpec?>(null)
+
+    /** Готовая спека последней удачной сборки. */
     val ready: StateFlow<MangaSpec?> = _ready.asStateFlow()
 
-    /* Причина отказа последней сборки:
-    /* экран показывает её текстом. */
     private val _failure = MutableStateFlow<MangaForge.Failure?>(null)
+
+    /** Причина отказа последней сборки. */
     val failure: StateFlow<MangaForge.Failure?> = _failure.asStateFlow()
 
+    /** Чтение спек с диска. Без вызова реестр пуст, но не падает. */
     fun init(context: Context) {
         if (store != null) return
         val dir = File(context.filesDir, DIR)
+        dir.mkdirs()
         store = MangaStore(dir)
         _specs.value = MangaStore(dir).list()
         logcat(LogPriority.DEBUG) { "MangaForge: спек " + _specs.value.size }
     }
 
     /** Источники для менеджера: по одному на спеку. */
-    fun sources(): List<VirtualMangaSource> = _specs.value.map { VirtualMangaSource(it, engine) }
+    fun sources(): List<VirtualMangaSource> =
+        _specs.value.map { VirtualMangaSource(it, engine) }
 
     fun source(host: String): VirtualMangaSource? = _specs.value
         .firstOrNull { it.host == host }
@@ -55,31 +60,33 @@ object MangaForgeSources {
     /**
      * Сборка по ссылке и установка.
      *
-     * Отказ не прячется: экран покажет причину (`js_only`, `anti_bot`,
-     * `no_catalog`), а реестр останется как был.
+     * Отказ не прячется: экран покажет причину, а реестр останется
+     * как был.
      */
     suspend fun install(rawUrl: String): MangaSpec? = withContext(Dispatchers.IO) {
-        when (val built = forge.build(rawUrl)) {
-            is MangaForge.Built -> {
-                save(built.spec)
-                _ready.value = built.spec
-                _failure.value = null
-                built.spec
-            }
-            is MangaForge.Failure -> {
-                _ready.value = null
-                _failure.value = built
-                null
-            }
+        val built = forge.build(rawUrl)
+        if (built is MangaForge.Failure) {
+            _ready.value = null
+            _failure.value = built
+            return@withContext null
         }
+        val spec = (built as MangaForge.Built).spec
+        save(spec)
+        _ready.value = spec
+        _failure.value = null
+        spec
     }
 
     /** Запись спеки на диск и обновление списка источников. */
     suspend fun save(spec: MangaSpec): MangaSpec = withContext(Dispatchers.IO) {
+        val target = store
+        if (target == null) {
+            logcat(LogPriority.ERROR) { "MangaForge: реестр не открыт" }
+            return@withContext spec
+        }
         val stamped = spec.copy(updatedAt = System.currentTimeMillis())
-        val target = store ?: error("MangaForgeSources.init не вызван")
         runCatching { target.save(stamped) }
-            .onFailure { logcat(LogPriority.ERROR, it) { "MangaForge: запись " + spec.host } }
+            .onFailure { logcat(LogPriority.ERROR, it) { "MangaForge: запись" } }
         _specs.value = target.list()
         stamped
     }
