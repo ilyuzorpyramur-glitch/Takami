@@ -145,7 +145,7 @@ class MangaEngine(
                 date_upload = date
             }
         }.distinctBy { it.url }
-        return if (spec.chapters.newestFirst) chapters else chapters.reversed()
+        return if (spec.chapters.newestFirst) chapters.reversed() else chapters
     }
 
     suspend fun pages(spec: MangaSpec, chapter: SChapter): List<Page> {
@@ -236,8 +236,8 @@ class MangaEngine(
     }
 
     companion object {
-        private val DOTTED = Regex("(\\d{1,2})[.\\-/](\\d{1,2})[.\\-/](\\d{4})")
-        private val ISO = Regex("(\\d{4})-(\\d{2})-(\\d{2})")
+        private val DOTTED = Regex("([0-9]{1,2})[.]([0-9]{1,2})[.]([0-9]{4})")
+        private val ISO = Regex("([0-9]{4})-([0-9]{2})-([0-9]{2})")
 
         /** Дата из текста: dd.MM.yyyy, dd/MM/yyyy, yyyy-MM-dd. Иначе null. */
         fun parseDate(raw: String): Long? {

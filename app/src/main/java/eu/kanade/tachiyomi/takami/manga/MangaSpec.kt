@@ -69,7 +69,7 @@ data class ChaptersSpec(
     /** Имя атрибута с адресом: href, data-href, data-url. */
     val linkAttr: String = "href",
     /** Номер главы из текста; пусто — номер не определяется. */
-    val numberRegex: String = "(?i)(?:глава|chapter|гл\\.)\\s*([0-9]+(?:[.,][0-9]+)?)",
+    val numberRegex: String = "([0-9]+([.,][0-9]+)?)",
     /** Подпись берём из текста; иначе «Глава N». */
     val nameFromText: Boolean = true,
     /** Селектор даты внутри блока; null — даты нет. */
