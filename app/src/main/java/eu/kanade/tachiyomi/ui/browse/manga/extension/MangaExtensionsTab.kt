@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AddLink
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Inventory2
@@ -31,7 +32,9 @@ import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.TabContent
 import eu.kanade.presentation.more.settings.screen.browse.MangaExtensionStoreScreen
 import eu.kanade.tachiyomi.extension.manga.model.MangaExtension
+import eu.kanade.tachiyomi.takami.manga.MangaForgeStrings
 import eu.kanade.tachiyomi.ui.browse.manga.extension.details.MangaExtensionDetailsScreen
+import eu.kanade.tachiyomi.ui.takami.MangaForgeScreen
 import eu.kanade.tachiyomi.ui.webview.WebViewScreen
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import eu.kanade.tachiyomi.util.system.isPackageInstalled
@@ -59,6 +62,11 @@ fun mangaExtensionsTab(
         badgeNumber = state.updates.takeIf { it > 0 },
         searchEnabled = true,
         actions = persistentListOf(
+            AppBar.OverflowAction(
+                title = MangaForgeStrings.ADD_BY_LINK,
+                icon = Icons.Outlined.AddLink,
+                onClick = { navigator.push(MangaForgeScreen()) },
+            ),
             AppBar.OverflowAction(
                 title = stringResource(MR.strings.action_filter),
                 icon = Icons.Outlined.FilterList,

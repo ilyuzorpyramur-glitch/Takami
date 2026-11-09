@@ -8,6 +8,7 @@ package eu.kanade.tachiyomi.takami.manga
  */
 object MangaForgeStrings {
     const val TITLE = "Манга-источники"
+    const val ADD_BY_LINK = "Добавить по ссылке"
     const val HINT = "Ссылка на каталог манги"
     const val BUILD = "Собрать источник"
     const val BUILDING = "Проверяю сайт…"

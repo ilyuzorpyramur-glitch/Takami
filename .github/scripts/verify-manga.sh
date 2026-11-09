@@ -92,7 +92,7 @@ SELCHECK
 [ -z "$SEL" ] && ok "M26 селекторы без русских имён" || bad "M26 русских селекторов: $SEL"
 
 CHANGED=$(git diff --name-only "$BASE"...HEAD 2>/dev/null)
-OUT=$(echo "$CHANGED" | grep -vE '^(app/src/main/java/eu/kanade/tachiyomi/takami/manga/|app/src/main/java/eu/kanade/tachiyomi/ui/takami/|app/src/test/java/eu/kanade/tachiyomi/takami/|app/src/main/java/eu/kanade/tachiyomi/source/manga/AndroidMangaSourceManager\.kt|app/src/main/java/eu/kanade/tachiyomi/takami/fetch/Fetcher\.kt|app/src/main/java/eu/kanade/tachiyomi/takami/fetch/ChallengeBrowser\.kt|app/src/test/java/eu/kanade/tachiyomi/takami/manga/|\.github/scripts/verify-manga\.sh|reports/manga-forge\.md)' | grep -v '^$')
+OUT=$(echo "$CHANGED" | grep -vE '^(app/src/main/java/eu/kanade/tachiyomi/takami/manga/|app/src/main/java/eu/kanade/tachiyomi/ui/takami/|app/src/test/java/eu/kanade/tachiyomi/takami/|app/src/main/java/eu/kanade/tachiyomi/source/manga/AndroidMangaSourceManager\.kt|app/src/main/java/eu/kanade/tachiyomi/ui/browse/manga/extension/MangaExtensionsTab\.kt|app/src/main/java/eu/kanade/tachiyomi/takami/fetch/Fetcher\.kt|app/src/main/java/eu/kanade/tachiyomi/takami/fetch/ChallengeBrowser\.kt|app/src/test/java/eu/kanade/tachiyomi/takami/manga/|\.github/scripts/verify-manga\.sh|\.github/scripts/verify-stage1\.sh|reports/manga-forge\.md)' | grep -v '^$')
 [ -z "$OUT" ] && ok "M27 чужие файлы не тронуты" || bad "M27 задеты: $(echo "$OUT" | head -3 | tr '\n' ' ')"
 
 if [ -f reports/manga-forge.md ]; then
@@ -137,6 +137,9 @@ has "$A/source/manga/AndroidMangaSourceManager.kt" 'MangaForgeSources' "M51 ме
 has "$U/MangaForgeScreen.kt" 'MangaForgeScreen' "M52 экран сборки на месте"
 has "$U/MangaForgeScreenModel.kt" 'MangaForgeSources.install' "M53 экран зовёт реестр"
 [ -f "$T/VirtualMangaSourceTest.kt" ] && ok "M54 тест обёртки на месте" || bad "M54 нет VirtualMangaSourceTest"
+
+has "$A/ui/browse/manga/extension/MangaExtensionsTab.kt" 'MangaForgeScreen' "M55 вход в мастер манги"
+has "$M/MangaForgeStrings.kt" 'ADD_BY_LINK' "M56 подпись кнопки мастера"
 
 bash "$HERE/verify-stage1.sh" "$ROOT" "$BASE" >/tmp/manga-stage1.log 2>&1
 G1=$(grep -cE '^\[[A-Za-z0-9.]+\] FAIL|^FAIL ' /tmp/manga-stage1.log)
