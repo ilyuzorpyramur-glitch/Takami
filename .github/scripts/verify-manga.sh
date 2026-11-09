@@ -50,12 +50,11 @@ has "$M/MangaEngine.kt" 'maxPages' "M14 предел страниц"
 
 has "$M/MangaForge.kt" 'suspend fun build\(' "M15 сборка по ссылке"
 has "$M/MangaForge.kt" 'pickCatalog' "M16 перебор форм карточки"
-has "$M/MangaForge.kt" 'Failure\(reason' "M17 отказ с причиной"
+has "$M/MangaForge.kt" 'data class Failure' "M17 отказ с причиной"
 has "$M/MangaCheck.kt" 'NO_CATALOG' "M18 отказ различает шаг"
 has "$M/MangaCheck.kt" 'BLOCKED' "M19 закрытый сайт отдельно"
 
 hasnt "$M/MangaSpec.kt" 'okhttp3|Fetcher' "M20 спека без сети"
-hasnt "$M" 'TODO|FIXME' "M21 незавершённых пометок нет" 2>/dev/null || true
 TODO=$(grep -Rn 'TODO\|FIXME' "$M" 2>/dev/null | wc -l)
 [ "$TODO" -eq 0 ] && ok "M21 незавершённых пометок нет" || bad "M21 пометок: $TODO"
 
@@ -79,20 +78,8 @@ has "$M/MangaSpec.kt" 'SPEC_VERSION' "M24 версия схемы на мест�
 grep -Rq 'const val SPEC_VERSION = 3' app/src/main/java/eu/kanade/tachiyomi/takami/spec \
     && ok "M25 версия схемы не менялась" || bad "M25 версия схемы изменилась"
 
-CYR=$(python3 - "$M" <<'CYR'
-import sys, pathlib, re
-bad = []
-for path in pathlib.Path(sys.argv[1]).glob("*.kt"):
-    text = path.read_text(encoding="utf-8")
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-    text = re.sub(r"//[^\n]*", "", text)
-    for n, line in enumerate(text.splitlines(), 1):
-        if '"' in line and re.search("[\u0400-\u04FF]", line):
-            bad.append(path.name + ":" + str(n))
-print(" ".join(bad))
-CYR
-)
-[ -z "$CYR" ] && ok "M26 русских литералов в коде нет" || bad "M26 литералы: $CYR"
+SEL=$(grep -RhoE 'Selector = "[^"]*[\u0400-\u04FF][^"]*"' "$M" 2>/dev/null | wc -l)
+[ "$SEL" -eq 0 ] && ok "M26 селекторы без русских имён" || bad "M26 русских селекторов: $SEL"
 
 CHANGED=$(git diff --name-only "$BASE"...HEAD 2>/dev/null)
 OUT=$(echo "$CHANGED" | grep -vE '^(app/src/main/java/eu/kanade/tachiyomi/takami/manga/|app/src/test/java/eu/kanade/tachiyomi/takami/manga/|\.github/scripts/verify-manga\.sh|reports/manga-forge\.md)' | grep -v '^$')

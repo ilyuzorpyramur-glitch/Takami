@@ -179,9 +179,9 @@ class MangaEngine(
     }
 
     private fun dateOf(spec: ChaptersSpec, item: Element, link: Element): Long {
-        val selector = spec.chapters.dateSelector?.takeIf { it.isNotBlank() } ?: return 0L
+        val selector = spec.dateSelector?.takeIf { it.isNotBlank() } ?: return 0L
         val element = item.selectFirst(selector) ?: link.selectFirst(selector) ?: return 0L
-        val raw = spec.chapters.dateAttr.takeIf { it.isNotBlank() }
+        val raw = spec.dateAttr.takeIf { it.isNotBlank() }
             ?.let { element.attr(it) }
             ?: element.text()
         return parseDate(raw) ?: 0L
