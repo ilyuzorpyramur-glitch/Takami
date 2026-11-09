@@ -78,8 +78,18 @@ has "$M/MangaSpec.kt" 'SPEC_VERSION' "M24 версия схемы на мест�
 grep -Rq 'const val SPEC_VERSION = 3' app/src/main/java/eu/kanade/tachiyomi/takami/spec \
     && ok "M25 версия схемы не менялась" || bad "M25 версия схемы изменилась"
 
-SEL=$(grep -RhoE 'Selector = "[^"]*[\u0400-\u04FF][^"]*"' "$M" 2>/dev/null | wc -l)
-[ "$SEL" -eq 0 ] && ok "M26 селекторы без русских имён" || bad "M26 русских селекторов: $SEL"
+SEL=$(python3 - "$M" <<'SELCHECK'
+import sys, pathlib, re
+pattern = re.compile('Selector = "[^"]*[\u0400-\u04FF][^"]*"')
+hits = []
+for path in pathlib.Path(sys.argv[1]).glob("*.kt"):
+    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if pattern.search(line):
+            hits.append(path.name + ":" + str(n))
+print(" ".join(hits))
+SELCHECK
+)
+[ -z "$SEL" ] && ok "M26 селекторы без русских имён" || bad "M26 русских селекторов: $SEL"
 
 CHANGED=$(git diff --name-only "$BASE"...HEAD 2>/dev/null)
 OUT=$(echo "$CHANGED" | grep -vE '^(app/src/main/java/eu/kanade/tachiyomi/takami/manga/|app/src/test/java/eu/kanade/tachiyomi/takami/manga/|\.github/scripts/verify-manga\.sh|reports/manga-forge\.md)' | grep -v '^$')
