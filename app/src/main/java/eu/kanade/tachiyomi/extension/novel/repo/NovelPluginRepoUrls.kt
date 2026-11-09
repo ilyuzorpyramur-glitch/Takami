@@ -13,9 +13,13 @@ internal fun resolveNovelPluginRepoIndexUrls(baseUrl: String): List<String> {
         // LNReader-style repos publish plugins.min.json / plugins.json; Tachiyomi-style repos
         // publish index.min.json / index.json. Try the LNReader names first since this app's
         // novel plugin repos use them, then fall back to the generic ones.
+        // LNReader-репозитории кладут сборку в .dist: без этих имён индекс
+        // не находится и пользователь видит «неизвестную ошибку».
         listOf(
             "$normalized/plugins.min.json",
             "$normalized/plugins.json",
+            "$normalized/.dist/plugins.min.json",
+            "$normalized/.dist/plugins.json",
             "$normalized/index.json",
             "$normalized/index.pb",
             "$normalized/index.min.json",
