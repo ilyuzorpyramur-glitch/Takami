@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.extension.manga.MangaExtensionManager
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.MangaSource
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.takami.manga.MangaForgeSources
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,11 +55,33 @@ class AndroidMangaSourceManager(
 
     private val stubSourcesMap = ConcurrentHashMap<Long, StubMangaSource>()
 
+    // Номера источников, созданных в приложении: при обновлении списка
+    // расширений их надо переносить в новую карту, а удалённые — убирать.
+    private val takamiSourceIds = mutableSetOf<Long>()
+
     override val catalogueSources: Flow<List<CatalogueSource>> = sourcesMapFlow.map {
         it.values.filterIsInstance<CatalogueSource>()
     }
 
     init {
+        MangaForgeSources.init(context)
+        scope.launch {
+            MangaForgeSources.specs.collectLatest { specs ->
+                val merged = ConcurrentHashMap(sourcesMapFlow.value)
+                val alive = specs.map { MangaForgeSources.source(it.host)?.id }.toSet()
+                merged.keys.retainAll { key -> key !in takamiSourceIds || key in alive }
+                takamiSourceIds.clear()
+                specs.forEach { spec ->
+                    MangaForgeSources.source(spec.host)?.let {
+                        merged[it.id] = it
+                        takamiSourceIds += it.id
+                    }
+                }
+                sourcesMapFlow.value = merged
+                _isInitialized.value = true
+            }
+        }
+
         scope.launch {
             extensionManager.installedExtensionsFlow
                 .collectLatest { extensions ->

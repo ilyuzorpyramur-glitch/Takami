@@ -17,7 +17,10 @@ import io.kotest.matchers.shouldBe
 import okhttp3.dnsoverhttps.DnsOverHttps
 import org.junit.jupiter.api.Test
 
-/** Клиент сетевого слоя уважает настройку DNS over HTTPS так же, как общий. */
+/**
+* Клиент сетевого слоя уважает настройку DNS over HTTPS так
+* же, как общий.
+ */
 class DohTest {
 
     @Test

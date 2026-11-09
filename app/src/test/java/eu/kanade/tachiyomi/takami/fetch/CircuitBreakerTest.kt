@@ -53,7 +53,7 @@ class CircuitBreakerTest {
     }
 
     @Test
-    fun `три ошибки открывают паузу и четвёртый запрос не идёт в сеть`(): Unit = runBlocking {
+    fun `три ошибки открывают`(): Unit = runBlocking {
         server.dispatcher = alwaysFailing()
         val gate = breaker()
         val fetcher = fetcher(gate)
@@ -73,9 +73,12 @@ class CircuitBreakerTest {
         server.dispatcher = alwaysFailing()
         val url = server.url("/catalog").toString()
 
-        // Раньше запись о загрузке снималась уже после того, как ожидающий
-        // получил ответ: следующий вызов иногда присоединялся к прошлой
-        // загрузке и получал её ошибку вместо проверки предохранителя.
+        // Раньше запись о загрузке снималась уже после
+        // того, как ожидающий
+        // получил ответ: следующий вызов иногда
+        // присоединялся к прошлой
+        // загрузке и получал её ошибку вместо проверки
+        // предохранителя.
         repeat(20) {
             val gate = breaker()
             val fetcher = fetcher(gate)
@@ -98,7 +101,8 @@ class CircuitBreakerTest {
         clock.advance(FetchLimits.BREAKER_PAUSE_MS + 1L)
         val before = server.requestCount
 
-        // Вызовы идут по очереди: пробный достаётся первому, его неудача
+        // Вызовы идут по очереди: пробный достаётся
+        // первому, его неудача
         // сразу возвращает паузу, и следующие уже не стучатся в сайт.
         val first = runCatching { fetcher.get(url) }
         val second = runCatching { fetcher.get(url) }
@@ -107,14 +111,15 @@ class CircuitBreakerTest {
         first.isFailure shouldBe true
         second.exceptionOrNull()!!::class shouldBe BreakerOpenError::class
         third.exceptionOrNull()!!::class shouldBe BreakerOpenError::class
-        // Пробный уходит один раз: его неудача сразу возвращает паузу,
+        // Пробный уходит один раз: его неудача сразу
+        // возвращает паузу,
         // поэтому повтор внутри той же операции уже не проходит.
         (server.requestCount - before) shouldBe 1
         gate.state(server.hostName).state shouldBe BreakerState.OPEN
     }
 
     @Test
-    fun `успешный пробный запрос закрывает предохранитель`(): Unit = runBlocking {
+    fun `успешный пробный запрос`(): Unit = runBlocking {
         val calls = AtomicInteger(0)
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse =

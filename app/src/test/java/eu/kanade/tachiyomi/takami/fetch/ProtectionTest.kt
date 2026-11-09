@@ -3,7 +3,10 @@ package eu.kanade.tachiyomi.takami.fetch
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
-/** Разбор защиты по заголовкам: браузерная проверка, капча и отказ — разные вещи. */
+/**
+* Разбор защиты по заголовкам: браузерная проверка,
+* капча и отказ — разные вещи.
+ */
 class ProtectionTest {
 
     @Test

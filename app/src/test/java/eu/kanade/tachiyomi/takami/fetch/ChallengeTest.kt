@@ -12,7 +12,8 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
 
 /**
- * Три уровня защиты: браузер проходит проверку сам, капчу проходит человек,
+ * Три уровня защиты: браузер проходит проверку сам,
+ * капчу проходит человек,
  * отказ не повторяется.
  */
 class ChallengeTest {
@@ -64,7 +65,7 @@ class ChallengeTest {
         .setBody("<html><head><title>Just a moment...</title></head><body></body></html>")
 
     @Test
-    fun `проверка браузера проходит и запрос повторяется один раз`(): Unit = runBlocking {
+    fun `проверка браузера проходит`(): Unit = runBlocking {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse =
                 if (request.path == "/catalog" && attempts.incrementAndGet() == 1) {

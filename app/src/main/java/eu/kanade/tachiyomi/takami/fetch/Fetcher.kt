@@ -157,7 +157,8 @@ class Fetcher internal constructor(
                 remember(key, loaded, guard.now())
                 loaded
             }
-            // Снимаем запись раньше, чем будим ожидающих: иначе следующий
+            // Снимаем запись раньше, чем будим ожидающих:
+            // иначе следующий
             // вызов успеет присоединиться к уже завершённой загрузке,
             // получит её ошибку и не спросит предохранитель.
             inFlight.remove(key, slot)
@@ -278,7 +279,8 @@ class Fetcher internal constructor(
      * Ответ как текст, без ворот HTML.
      *
      * Служебные ответы плееров — это JSON: ворота считают его не той
-     * страницей и отбрасывают, а разобрать его нужно. Кодировку берём у
+     * страницей и отбрасывают, а разобрать его нужно.
+     * Кодировку берём у
      * ответа, размер уже ограничен при чтении.
      */
     suspend fun getText(url: String, referer: String? = null): String {
@@ -286,13 +288,19 @@ class Fetcher internal constructor(
         return textOf(send(url, referer, FetchPriority.INTERACTIVE))
     }
 
-    /** То же для запроса с телом: ссылки плеера приходят ответом на POST. */
+    /**
+    * То же для запроса с телом: ссылки плеера приходят
+    * ответом на POST.
+     */
     suspend fun postText(url: String, body: String, referer: String? = null): String {
         currentCoroutineContext().ensureActive()
         return textOf(send(url, referer, FetchPriority.INTERACTIVE, post = body, form = true))
     }
 
-    /** Текст ответа: код проверяем, пустое тело — ошибка, ворота не зовём. */
+    /**
+    * Текст ответа: код проверяем, пустое тело — ошибка,
+    * ворота не зовём.
+     */
     private fun textOf(raw: Raw): String {
         if (raw.code !in 200..299) throw HttpStatusError(raw.code, raw.url)
         if (raw.bytes.isEmpty()) throw NotHtmlError(raw.url, raw.contentType.orEmpty())
@@ -470,7 +478,12 @@ class Fetcher internal constructor(
                     // пробуем один раз.
                     val host = hostOf(current)
                     if (browserPassed || passBrowser(raw.url, host) == null) {
-                        refuse(host, raw.url, ProtectionLevel.CAPTCHA, "проверка браузера не пройдена")
+                        refuse(
+                            host,
+                            raw.url,
+                            ProtectionLevel.CAPTCHA,
+                            "проверка браузера не пройдена",
+                        )
                     }
                     browserPassed = true
                     continue

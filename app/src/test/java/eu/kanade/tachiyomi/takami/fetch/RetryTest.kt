@@ -14,7 +14,10 @@ import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertFailsWith
 
-/** Повторы на живом сервере: сбой проходит, отсутствие страницы — нет. */
+/**
+* Повторы на живом сервере: сбой проходит, отсутствие
+* страницы — нет.
+ */
 class RetryTest {
     private lateinit var server: MockWebServer
     private lateinit var clock: FakeFetchClock
@@ -58,7 +61,7 @@ class RetryTest {
     }
 
     @Test
-    fun `ответ пятьсот три повторяется не больше трёх раз`(): Unit = runBlocking {
+    fun `ответ пятьсот три`(): Unit = runBlocking {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse =
                 MockResponse().setResponseCode(503)

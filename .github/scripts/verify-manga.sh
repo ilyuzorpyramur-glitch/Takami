@@ -125,6 +125,19 @@ has "$M/MangaForge.kt" 'refineChapters' "M43 главы уточняются п�
 has "$M/MangaForge.kt" 'refinePages' "M44 страницы уточняются по главе"
 [ -f "$T/MangaAutoDetectTest.kt" ] && ok "M45 проверка поиска селекторов" || bad "M45 нет MangaAutoDetectTest"
 
+A="$ROOT/app/src/main/java/eu/kanade/tachiyomi"
+U="$A/ui/takami"
+
+has "$M/VirtualMangaSource.kt" 'CatalogueSource' "M46 обёртка отдаёт CatalogueSource"
+has "$M/VirtualMangaSource.kt" 'MangaSourceId.of' "M47 номер источника из хоста"
+has "$M/VirtualMangaSource.kt" 'getPageList' "M48 обёртка отдаёт страницы главы"
+has "$M/MangaForgeSources.kt" 'fun sources\(\)' "M49 реестр отдаёт источники"
+has "$M/MangaForgeSources.kt" 'MangaStore' "M50 реестр пишет спеки на диск"
+has "$A/source/manga/AndroidMangaSourceManager.kt" 'MangaForgeSources' "M51 менеджер видит свои источники"
+has "$U/MangaForgeScreen.kt" 'MangaForgeScreen' "M52 экран сборки на месте"
+has "$U/MangaForgeScreenModel.kt" 'MangaForgeSources.install' "M53 экран зовёт реестр"
+[ -f "$T/VirtualMangaSourceTest.kt" ] && ok "M54 тест обёртки на месте" || bad "M54 нет VirtualMangaSourceTest"
+
 bash "$HERE/verify-stage1.sh" "$ROOT" "$BASE" >/tmp/manga-stage1.log 2>&1
 G1=$(grep -cE '^\[[A-Za-z0-9.]+\] FAIL|^FAIL ' /tmp/manga-stage1.log)
 [ "$G1" -eq 0 ] && ok "R гейт первого этапа проходит" || bad "R гейт первого этапа: провалов $G1"

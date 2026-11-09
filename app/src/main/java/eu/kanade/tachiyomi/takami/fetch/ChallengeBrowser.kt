@@ -84,7 +84,8 @@ class WebViewChallengeBrowser(private val context: Context) : ChallengeBrowser {
         val cookies = manager.getCookie(url).orEmpty()
         (changed == true).also { passed ->
             logcat(LogPriority.DEBUG) {
-                "Takami: проверка браузера " + host + (if (passed) " пройдена" else " не пройдена")
+                "Takami: проверка браузера " + host +
+                    (if (passed) " пройдена" else " не пройдена")
             }
         }
         if (changed == true && cookies.isNotBlank()) cookies else null
