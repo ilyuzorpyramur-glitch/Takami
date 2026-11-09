@@ -29,33 +29,42 @@ class MangaForge(
     suspend fun build(rawUrl: String): Any = withContext(Dispatchers.IO) {
         val url = rawUrl.trim()
         val parsed = runCatching { URI(url) }.getOrNull()
-        val host = parsed?.host?.removePrefix("www.") ?: return@withContext Failure(
-            reason = "bad_url",
-            message = "ссылка не разобрана",
-        )
-        val base = (parsed.scheme ?: "https") + "://" + (parsed.host ?: host)
+        val host = parsed?.host?.removePrefix("www.")
+        if (host.isNullOrBlank()) {
+            return@withContext Failure(reason = "bad_url", message = "ссылка не разобрана")
+        }
+        val scheme = parsed?.scheme ?: "https"
+        val base = scheme + "://" + parsed?.host.orEmpty()
         val name = host.substringBefore('.').replaceFirstChar { it.uppercase() }
 
-        val best = pickCatalog(base, host, name) ?: return@withContext Failure(
-            reason = MangaCheck.NO_CATALOG.key,
-            message = "ни одна форма карточки не дала тайтлов",
-        )
+        val best = pickCatalog(base, host, name)
+        if (best == null) {
+            return@withContext Failure(
+                reason = MangaCheck.NO_CATALOG.key,
+                message = "ни одна форма карточки не дала тайтлов",
+            )
+        }
+
         val spec = best.spec
         val first = best.items.firstOrNull()
-
-        val chapters = if (first != null) runCatching { engine.chapters(spec, first) }.getOrDefault(emptyList())
-        val pages = if (chapters.isNotEmpty()) {
-            runCatching { engine.pages(spec, chapters.last()) }.getOrDefault(emptyList())
-        } else {
+        val chapters = if (first == null) {
             emptyList()
+        } else {
+            runCatching { engine.chapters(spec, first) }.getOrDefault(emptyList())
+        }
+        val pages = if (chapters.isEmpty()) {
+            emptyList()
+        } else {
+            runCatching { engine.pages(spec, chapters.last()) }.getOrDefault(emptyList())
         }
         val check = MangaCheck.of(
             catalog = best.items.size,
             chapters = chapters.size,
             pages = pages.size,
         )
+        val passed = listOf(best.items.size, chapters.size, pages.size).count { it > 0 }
         Built(
-            spec = spec.copy(checksPassed = listOf(best.items.size, chapters.size, pages.size).count { it > 0 }),
+            spec = spec.copy(checksPassed = passed),
             check = check,
             catalogCount = best.items.size,
             chaptersCount = chapters.size,
