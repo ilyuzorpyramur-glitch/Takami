@@ -12,13 +12,25 @@ enum class MangaCheck(val key: String) {
     NO_CHAPTERS("no_chapters"),
     NO_PAGES("no_pages"),
     BLOCKED("blocked"),
+    /** Сайт собирает страницу в браузере: селекторами её не прочитать. */
+    JS_ONLY("js_only"),
+    /** Сайт отдал проверку браузера вместо страницы. */
+    ANTI_BOT("anti_bot"),
     FAILED("failed"),
     ;
 
     companion object {
         /** Итог по трём шагам: каталог, главы, страницы. */
-        fun of(catalog: Int, chapters: Int, pages: Int, blocked: Boolean = false): MangaCheck = when {
+        fun of(
+            catalog: Int,
+            chapters: Int,
+            pages: Int,
+            blocked: Boolean = false,
+            markup: MangaMarkup = MangaMarkup.SERVER,
+        ): MangaCheck = when {
             blocked -> BLOCKED
+            markup == MangaMarkup.JS_ONLY -> JS_ONLY
+            markup == MangaMarkup.ANTI_BOT -> ANTI_BOT
             catalog <= 0 -> NO_CATALOG
             chapters <= 0 -> NO_CHAPTERS
             pages <= 0 -> NO_PAGES
@@ -32,6 +44,8 @@ enum class MangaCheck(val key: String) {
             NO_CHAPTERS -> "главы не найдены"
             NO_PAGES -> "страницы главы не найдены"
             BLOCKED -> "сайт не отдаёт страницу"
+            JS_ONLY -> "сайт собирает страницу в браузере"
+            ANTI_BOT -> "сайт закрылся проверкой браузера"
             FAILED -> "проверка не удалась"
         }
     }

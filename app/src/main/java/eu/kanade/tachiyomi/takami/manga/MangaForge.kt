@@ -19,6 +19,7 @@ class MangaForge(
     data class Built(
         val spec: MangaSpec,
         val check: MangaCheck,
+        val markup: MangaMarkup,
         val catalogCount: Int,
         val chaptersCount: Int,
         val pagesCount: Int,
@@ -37,6 +38,13 @@ class MangaForge(
         val base = scheme + "://" + parsed?.host.orEmpty()
         val name = host.substringBefore('.').replaceFirstChar { it.uppercase() }
 
+        val markup = markupOf(base)
+        if (markup == MangaMarkup.JS_ONLY || markup == MangaMarkup.ANTI_BOT) {
+            return@withContext Failure(
+                reason = markup.key,
+                message = MangaMarkup.text(markup),
+            )
+        }
         val best = pickCatalog(base, host, name)
         if (best == null) {
             return@withContext Failure(
@@ -66,10 +74,17 @@ class MangaForge(
         Built(
             spec = spec.copy(checksPassed = passed),
             check = check,
+            markup = markup,
             catalogCount = best.items.size,
             chaptersCount = chapters.size,
             pagesCount = pages.size,
         )
+    }
+
+    /** Что за ответ на главной: разметка или пустая оболочка. */
+    private suspend fun markupOf(base: String): MangaMarkup {
+        val html = runCatching { engine.fetchPage(base, null).html }.getOrNull()
+        return MangaMarkup.detect(html.orEmpty())
     }
 
     private suspend fun pickCatalog(base: String, host: String, name: String): Candidate? {

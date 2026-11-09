@@ -92,6 +92,20 @@ else
     bad "M28 нет отчёта reports/manga-forge.md"
 fi
 
+for f in MangaMarkup MangaStore MangaSourceId; do
+    [ -f "$M/$f.kt" ] && ok "M29 файл $f.kt" || bad "M29 нет $f.kt"
+done
+has "$M/MangaMarkup.kt" 'JS_ONLY' "M30 браузерная сборка отличается от пустого каталога"
+has "$M/MangaMarkup.kt" 'ANTI_BOT' "M31 проверка браузера отдельным итогом"
+has "$M/MangaCheck.kt" 'JS_ONLY("js_only")' "M32 итог проверки знает оболочку"
+has "$M/MangaForge.kt" 'MangaMarkup.detect' "M33 кузница смотрит, что отдал сайт"
+has "$M/MangaStore.kt" 'fun save\(spec: MangaSpec\)' "M34 спека сохраняется"
+has "$M/MangaStore.kt" 'fun load\(host: String\)' "M35 спека читается"
+has "$M/MangaSourceId.kt" 'fun of\(host: String\)' "M36 номер источника постоянен"
+for f in MangaMarkupTest MangaStoreTest; do
+    [ -f "$T/$f.kt" ] && ok "M37 проверка $f" || bad "M37 нет $f"
+done
+
 bash "$HERE/verify-stage1.sh" "$ROOT" "$BASE" >/tmp/manga-stage1.log 2>&1
 G1=$(grep -cE '^\[[A-Za-z0-9.]+\] FAIL|^FAIL ' /tmp/manga-stage1.log)
 [ "$G1" -eq 0 ] && ok "R гейт первого этапа проходит" || bad "R гейт первого этапа: провалов $G1"
