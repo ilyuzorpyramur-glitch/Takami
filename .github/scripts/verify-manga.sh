@@ -106,6 +106,15 @@ for f in MangaMarkupTest MangaStoreTest; do
     [ -f "$T/$f.kt" ] && ok "M37 проверка $f" || bad "M37 нет $f"
 done
 
+[ -f "$M/MangaAutoDetect.kt" ] && ok "M38 поиск селекторов по разметке" || bad "M38 нет MangaAutoDetect"
+has "$M/MangaAutoDetect.kt" 'fun catalog\(doc: Document\)' "M39 карточка каталога по повтору"
+has "$M/MangaAutoDetect.kt" 'fun chapters\(doc: Document\)' "M40 главы по номеру в подписи"
+has "$M/MangaAutoDetect.kt" 'fun pages\(doc: Document\)' "M41 страницы по длинной группе"
+has "$M/MangaForge.kt" 'MangaAutoDetect.catalog' "M42 кузница ищет структуру первой"
+has "$M/MangaForge.kt" 'refineChapters' "M43 главы уточняются по карточке"
+has "$M/MangaForge.kt" 'refinePages' "M44 страницы уточняются по главе"
+[ -f "$T/MangaAutoDetectTest.kt" ] && ok "M45 проверка поиска селекторов" || bad "M45 нет MangaAutoDetectTest"
+
 bash "$HERE/verify-stage1.sh" "$ROOT" "$BASE" >/tmp/manga-stage1.log 2>&1
 G1=$(grep -cE '^\[[A-Za-z0-9.]+\] FAIL|^FAIL ' /tmp/manga-stage1.log)
 [ "$G1" -eq 0 ] && ok "R гейт первого этапа проходит" || bad "R гейт первого этапа: провалов $G1"

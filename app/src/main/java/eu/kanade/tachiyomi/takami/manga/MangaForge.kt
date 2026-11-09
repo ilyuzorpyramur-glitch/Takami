@@ -2,15 +2,18 @@ package eu.kanade.tachiyomi.takami.manga
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.jsoup.Jsoup
 import tachiyomi.core.common.util.system.logcat
 import java.net.URI
 
 /**
- * Сборка манга-спеки по ссылке: перебирает известные формы
- * вёрстки, оставляет ту, что даёт карточки, и проверяет главы.
+ * Сборка манга-спеки по ссылке.
  *
- * Ничего не выдумывает: если шаг не подтвердился разметкой, спека
- * собирается, но итог говорит, какой шаг провалился.
+ * Порядок: сначала смотрим, что отдал сайт, затем ищем селекторы по
+ * самой разметке ([MangaAutoDetect]), и только если структура не
+ * нашлась — перебираем известные формы карточки. Каждый шаг
+ * возвращает счётчик, поэтому итог говорит правду: что нашли и где
+ * остановились.
  */
 class MangaForge(
     private val engine: MangaEngine = MangaEngine(),
@@ -38,55 +41,112 @@ class MangaForge(
         val base = scheme + "://" + parsed?.host.orEmpty()
         val name = host.substringBefore('.').replaceFirstChar { it.uppercase() }
 
-        val markup = markupOf(base)
-        if (markup == MangaMarkup.JS_ONLY || markup == MangaMarkup.ANTI_BOT) {
-            return@withContext Failure(
-                reason = markup.key,
-                message = MangaMarkup.text(markup),
-            )
+        val home = runCatching { engine.fetchPage(base, null) }.getOrNull()
+        if (home == null) {
+            return@withContext Failure(reason = MangaCheck.BLOCKED.key, message = "главная не открылась")
         }
-        val best = pickCatalog(base, host, name)
-        if (best == null) {
+        val markup = MangaMarkup.detect(home.html)
+        if (markup == MangaMarkup.JS_ONLY || markup == MangaMarkup.ANTI_BOT) {
+            return@withContext Failure(reason = markup.key, message = MangaMarkup.text(markup))
+        }
+
+        var spec = MangaSpec(host = host, baseUrl = base, name = name, catalog = emptyCatalog())
+        val found = MangaAutoDetect.catalog(Jsoup.parse(home.html, home.url))
+        var items = emptyList<eu.kanade.tachiyomi.source.model.SManga>()
+        if (found != null) {
+            spec = spec.copy(
+                catalog = MangaCatalogSpec(
+                    itemSelector = found.itemSelector,
+                    linkSelector = found.linkSelector,
+                    titleSelector = found.titleSelector,
+                    posterSelector = found.posterSelector,
+                ),
+            )
+            items = runCatching { engine.parseCatalog(spec, home.html, home.url).first }
+                .getOrDefault(emptyList())
+        }
+        if (items.size < MINIMUM) {
+            val fallback = pickCatalog(base, host, name)
+            if (fallback != null && fallback.items.size > items.size) {
+                spec = fallback.spec
+                items = fallback.items
+            }
+        }
+        if (items.size < MINIMUM) {
             return@withContext Failure(
                 reason = MangaCheck.NO_CATALOG.key,
-                message = "ни одна форма карточки не дала тайтлов",
+                message = "карточки не найдены ни по структуре, ни по формам",
             )
         }
 
-        val spec = best.spec
-        val first = best.items.firstOrNull()
-        val chapters = if (first == null) {
-            emptyList()
-        } else {
-            runCatching { engine.chapters(spec, first) }.getOrDefault(emptyList())
+        val first = items.first()
+        val titleHtml = runCatching { engine.fetchPage(first.url, base).html }.getOrNull()
+        if (titleHtml != null) {
+            spec = refineChapters(spec, titleHtml, first.url)
         }
-        val pages = if (chapters.isEmpty()) {
-            emptyList()
-        } else {
-            runCatching { engine.pages(spec, chapters.last()) }.getOrDefault(emptyList())
+        val chapters = runCatching { engine.chapters(spec, first) }.getOrDefault(emptyList())
+
+        var pages = emptyList<eu.kanade.tachiyomi.source.model.Page>()
+        val lastChapter = chapters.lastOrNull()
+        if (lastChapter != null) {
+            val chapterHtml = runCatching { engine.fetchPage(lastChapter.url, base).html }.getOrNull()
+            if (chapterHtml != null) {
+                spec = refinePages(spec, chapterHtml, lastChapter.url)
+            }
+            pages = runCatching { engine.pages(spec, lastChapter) }.getOrDefault(emptyList())
         }
+
         val check = MangaCheck.of(
-            catalog = best.items.size,
+            catalog = items.size,
             chapters = chapters.size,
             pages = pages.size,
+            markup = markup,
         )
-        val passed = listOf(best.items.size, chapters.size, pages.size).count { it > 0 }
+        val passed = listOf(items.size, chapters.size, pages.size).count { it > 0 }
+        logcat {
+            "[MangaForge] " + host + ": каталог " + items.size +
+                ", глав " + chapters.size + ", страниц " + pages.size
+        }
         Built(
             spec = spec.copy(checksPassed = passed),
             check = check,
             markup = markup,
-            catalogCount = best.items.size,
+            catalogCount = items.size,
             chaptersCount = chapters.size,
             pagesCount = pages.size,
         )
     }
 
-    /** Что за ответ на главной: разметка или пустая оболочка. */
-    private suspend fun markupOf(base: String): MangaMarkup {
-        val html = runCatching { engine.fetchPage(base, null).html }.getOrNull()
-        return MangaMarkup.detect(html.orEmpty())
+    /** Главы: селектор из разметки карточки тайтла. */
+    private fun refineChapters(spec: MangaSpec, html: String, pageUrl: String): MangaSpec {
+        val doc = Jsoup.parse(html, pageUrl)
+        val found = MangaAutoDetect.chapters(doc) ?: return spec
+        return spec.copy(
+            chapters = spec.chapters.copy(
+                itemSelector = found.itemSelector,
+                linkSelector = found.linkSelector,
+            ),
+        )
     }
 
+    /** Страницы: селектор из разметки первой главы. */
+    private fun refinePages(spec: MangaSpec, html: String, pageUrl: String): MangaSpec {
+        val doc = Jsoup.parse(html, pageUrl)
+        val found = MangaAutoDetect.pages(doc) ?: return spec
+        return spec.copy(
+            pages = spec.pages.copy(
+                containerSelector = found.containerSelector,
+                itemSelector = found.itemSelector,
+            ),
+        )
+    }
+
+    /**
+     * Запасной путь: известные формы карточки.
+     *
+     * Нужен, когда структура списка неоднородна и поиск по повтору
+     * не находит общего блока.
+     */
     private suspend fun pickCatalog(base: String, host: String, name: String): Candidate? {
         var best: Candidate? = null
         for (itemSelector in ITEM_FORMS) {
@@ -97,36 +157,30 @@ class MangaForge(
                 catalog = MangaCatalogSpec(itemSelector = itemSelector),
             )
             val items = runCatching { engine.catalogue(spec, 1) }.getOrNull()?.first.orEmpty()
-            if (best == null || items.size > best!!.items.size) {
+            if (best == null || items.size > (best?.items?.size ?: 0)) {
                 best = Candidate(spec, items)
             }
             if (items.size >= STRONG) break
         }
         val candidate = best ?: return null
-        if (candidate.items.size < MINIMUM) {
-            logcat { "[MangaForge] каталог не подтверждён: " + candidate.items.size }
-            return null
-        }
-        return candidate.copy(spec = refine(candidate.spec))
+        return candidate.takeIf { it.items.size >= MINIMUM }
     }
 
-    /** Уточнение ссылки внутри карточки по видимой разметке. */
-    private fun refine(spec: MangaSpec): MangaSpec {
-        val catalog = spec.catalog
-        val link = if (catalog.itemSelector.contains("a[href]")) "a[href]" else "a[href]"
-        return spec.copy(catalog = catalog.copy(linkSelector = link))
-    }
+    private fun emptyCatalog() = MangaCatalogSpec(itemSelector = "article")
 
-    private data class Candidate(val spec: MangaSpec, val items: List<eu.kanade.tachiyomi.source.model.SManga>)
+    private data class Candidate(
+        val spec: MangaSpec,
+        val items: List<eu.kanade.tachiyomi.source.model.SManga>,
+    )
 
     companion object {
-        /** Сколько карточек достаточно, чтобы форма считалась рабочей. */
+        /** Сколько карточек достаточно, чтобы структура считалась найденной. */
         const val MINIMUM = 3
 
         /** Уверенное попадание: дальше формы не перебираем. */
         const val STRONG = 12
 
-        /** Формы карточки, которые встречаются чаще всего. */
+        /** Запасные формы карточки, если структура не нашлась. */
         val ITEM_FORMS = listOf(
             "div.card",
             "article",
@@ -137,15 +191,6 @@ class MangaForge(
             "div.book-item",
             "li.manga",
             "div.catalog-item",
-        )
-
-        /** Формы ссылки на главу: подсказка, когда глав не нашли. */
-        val CHAPTER_FORMS = listOf(
-            "a[href*='chapter']",
-            "a[href*='glava']",
-            "li.chapter a",
-            "div.chapter a",
-            "a.chapter",
         )
     }
 }
