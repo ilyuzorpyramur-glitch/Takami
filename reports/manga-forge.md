@@ -8,17 +8,16 @@
 
 ## Состав
 
-- `manga/MangaSpec.kt` — описание: каталог, карточка, главы, страницы.
-  Версия схемы та же, что у аниме-спеки.
+- `manga/MangaSpec.kt` — каталог, карточка, главы, страницы; версия схемы
+  общая с аниме-спекой.
 - `manga/MangaEngine.kt` — исполнитель: каталог, поиск, карточка,
   главы, страницы. Разбор (`parseCatalog`, `parseDetails`,
   `parseChapters`, `parsePages`) отделён от сети и проверяется без неё.
   Сеть только через `Fetcher`: лимиты, кэш, повторы там.
 - `manga/MangaForge.kt` — сборка по ссылке: перебор форм карточки,
   проверка глав и страниц, итог с названием провалившегося шага.
-- `manga/MangaCheck.kt` — итог: `ok`, `no_catalog`, `no_chapters`,
-  `no_pages`, `blocked`, `failed` с подписью. Ноль без причины не
-  выдаётся.
+- `manga/MangaCheck.kt` — итог с подписью: `ok`, `no_catalog`, `no_chapters`,
+  `no_pages`, `blocked`, `js_only`, `anti_bot`, `failed`.
 
 ## Решения
 
