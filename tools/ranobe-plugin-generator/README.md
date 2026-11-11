@@ -42,6 +42,12 @@ npm install --no-save   # только для проверок: cheerio и dayjs
 node index.js --input examples/example-ranobe.json --out-dir out --index
 ```
 
+Конфигом может быть один объект или массив объектов: во втором случае
+плагины генерируются для каждой записи, а индекс пополняется всеми ими.
+
+Конфигом может быть один объект или массив объектов: во втором случае
+плагины генерируются для каждой записи, а индекс пополняется всеми ими.
+
 `--index` пишет `plugins.json` — формат LNReader-репозитория, который приложение
 ищет первым (`plugins.min.json`, `plugins.json`, `index.json`, `index.pb`,
 `index.min.json`, см. `NovelPluginRepoUrls.kt`). Запись несёт `sha256` файла

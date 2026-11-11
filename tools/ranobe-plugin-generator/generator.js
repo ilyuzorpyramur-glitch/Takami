@@ -100,7 +100,8 @@ function generatePluginCode(config) {
   const hasChapter = Boolean(chapter);
 
   const lines = [];
-  lines.push('// Файл сгенерирован инструментом tools/ranobe-plugin-generator: правки лучше вносить в конфиг и перегенерировать.');
+  lines.push('// Файл сгенерирован инструментом tools/ranobe-plugin-generator: правки лучше вносить в конфиг и');
+  lines.push('// перегенерировать.');
   lines.push('// Совместимо с рантаймом новелл Takami: @libs/fetch, cheerio, dayjs, @libs/isAbsoluteUrl.');
   lines.push("const { fetchApi } = require('@libs/fetch');");
   lines.push("const { load } = require('cheerio');");
@@ -146,7 +147,8 @@ function generatePluginCode(config) {
   lines.push('function pickValue($, root, spec) {');
   lines.push('  if (!spec) return null;');
   lines.push('  const parsed = parseSpec(spec);');
-  lines.push('  const el = root.find(parsed.sel).first();');
+  lines.push('  let el = root.find(parsed.sel).first();');
+  lines.push('  if (!el.length && root.is && root.is(parsed.sel)) el = root;');
   lines.push('  if (!el.length) return null;');
   lines.push('  if (parsed.attr) {');
   lines.push('    const value = el.attr(parsed.attr);');

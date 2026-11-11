@@ -12,7 +12,14 @@ const { execFileSync } = require('node:child_process');
 const cheerio = require('cheerio');
 const dayjs = require('dayjs');
 
-const { generate, generatePluginCode, indexEntryFor, sha256, sanitizeFileName, validateConfig } = require('./generator');
+const {
+  generate,
+  generatePluginCode,
+  indexEntryFor,
+  sha256,
+  sanitizeFileName,
+  validateConfig,
+} = require('./generator');
 
 const SITE = 'https://example.org';
 const ENCODED_QUERY = encodeURIComponent('Золото');
@@ -69,7 +76,8 @@ function loadPlugin(code, fetchLog) {
     code,
     'var __pluginExport = exports.default || module.exports.default || module.exports;',
     'if (!__pluginExport) throw new Error("нет экспорта");',
-    'if (typeof __pluginExport === "function") { __plugin = new __pluginExport(); } else { __plugin = __pluginExport; }',
+    'if (typeof __pluginExport === "function") { __plugin = new __pluginExport(); } else' +
+    ' { __plugin = __pluginExport; }',
   ].join('\n');
   const context = {
     console: console,
@@ -93,7 +101,7 @@ function writeExample(config, dir, options) {
 const exampleConfig = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'example-ranobe.json'), 'utf8'));
 const htmlConfig = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'example-ranobe-html.json'), 'utf8'));
 
-test('популярное: карточки с абсолютными адресами, карточка без ссылки отброшена', async () => {
+test('популярное: карточки и фильтр карточек без ссылки', async () => {
   const log = [];
   const plugin = loadPlugin(generatePluginCode(exampleConfig), log);
   const cards = await plugin.popularNovels('1');
@@ -104,7 +112,7 @@ test('популярное: карточки с абсолютными адре�
   assert.equal(log[0].url, SITE + '/catalog?page=1');
 });
 
-test('подстановка страницы {page}: второй лист идёт по адресу ?page=2', async () => {
+test('подстановка {page}: второй лист идёт по ?page=2', async () => {
   const log = [];
   const plugin = loadPlugin(generatePluginCode(exampleConfig), log);
   await plugin.popularNovels('2');
@@ -144,15 +152,19 @@ test('новелла: поля, теги и главы с датами в ISO', 
   assert.equal(details.chapters[2].releaseTime, dayjs('2026-01-03').toISOString());
 });
 
-test('глава в режиме text: абзацы через перевод строки, реклама и скрипт вычищены', async () => {
+test('глава в режиме text: абзацы и чистка', async () => {
   const plugin = loadPlugin(generatePluginCode(exampleConfig), []);
   const content = await plugin.chapterNovelContent('/novels/example-novel/chapter-1');
-  assert.equal(content, 'Первый абзац истории про экспедицию.\nВторой абзац с описанием дороги.');
+  assert.equal(
+    content,
+    'Первый абзац истории про экспедицию.\n' +
+      'Второй абзац с описанием дороги.',
+  );
   assert.ok(!content.includes('Рекламный блок'));
   assert.ok(!content.includes('alert'));
 });
 
-test('глава в режиме html: разметка сохранена, служебные блоки вычищены', async () => {
+test('глава в режиме html: разметка и чистка', async () => {
   const plugin = loadPlugin(generatePluginCode(htmlConfig), []);
   const content = await plugin.chapterNovelContent('/novels/example-novel/chapter-1');
   assert.ok(content.includes('<p>Первый абзац истории про экспедицию.</p>'));
@@ -182,7 +194,7 @@ test('индексная запись несёт sha256 файла плагин�
   assert.equal(entry.iconUrl, SITE + '/icon.png');
 });
 
-test('командная строка: плагин и plugins.json, сумма в индексе совпадает с файлом', () => {
+test('командная строка: плагин и plugins.json', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ranobe-gen-cli-'));
   const input = path.join(__dirname, 'examples', 'example-ranobe.json');
   execFileSync(process.execPath, [path.join(__dirname, 'index.js'), '--input', input, '--out-dir', tmp, '--index']);
@@ -195,7 +207,7 @@ test('командная строка: плагин и plugins.json, сумма 
   assert.equal(index[0].sha256, sha256(fs.readFileSync(pluginFile)));
 });
 
-test('правила репозитория в сгенерированном коде: 120 символов, без табуляций, по-русски', () => {
+test('правила репозитория в сгенерированном коде', () => {
   for (const config of [exampleConfig, htmlConfig]) {
     const code = generatePluginCode(config);
     assert.ok(!code.includes('\t'), 'табуляция в коде');
@@ -221,7 +233,7 @@ test('имена файлов чистятся от недопустимых с�
   assert.equal(sanitizeFileName('a b/c:d'), 'a_b_c_d');
 });
 
-test('полная генерация в каталог не перезаписывает чужие записи индекса', () => {
+test('генерация не трогает чужие записи индекса', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ranobe-gen-'));
   fs.writeFileSync(path.join(tmp, 'plugins.json'), JSON.stringify([{ id: 'other.plugin' }], null, 2), 'utf8');
   writeExample(exampleConfig, tmp, { index: true });
@@ -229,8 +241,21 @@ test('полная генерация в каталог не перезапис�
   assert.deepEqual(index.map((entry) => entry.id), ['other.plugin', 'example.ranobe']);
 });
 
-test('сгенерированный код синтаксически корректен без исполнения', () => {
+test('сгенерированный код синтаксически корректен', () => {
   for (const config of [exampleConfig, htmlConfig]) {
     assert.doesNotThrow(() => new Function(generatePluginCode(config)));
   }
+});
+
+test('селектор карточки совпадает с самим элементом: имя и ссылка из него', async () => {
+  FIXTURE_URLS[SITE + '/catalog2?page=1'] = 'catalog-self.html';
+  const selfConfig = JSON.parse(JSON.stringify(exampleConfig));
+  selfConfig.listings = {
+    popular: { path: '/catalog2?page={page}', item: '.card-link', name: '.card-link', link: '.card-link@href' },
+  };
+  const plugin = loadPlugin(generatePluginCode(selfConfig), []);
+  const cards = await plugin.popularNovels('1');
+  assert.equal(cards.length, 2);
+  assert.equal(cards[0].name, 'Альфа');
+  assert.equal(cards[0].path, SITE + '/novels/alpha');
 });
