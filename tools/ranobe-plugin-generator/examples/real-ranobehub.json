@@ -1,0 +1,16 @@
+{
+  "id": "ranobehub.ranobe",
+  "name": "RanobeHub",
+  "site": "https://ranobehub.org",
+  "lang": "ru",
+  "version": 1,
+  "listings": {
+    "popular": {
+      "path": "/ranobe?page={page}",
+      "item": ".book-card",
+      "name": "h3",
+      "link": "a@href",
+      "cover": "img.book-cover-image@src"
+    }
+  }
+}

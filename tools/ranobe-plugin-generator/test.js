@@ -38,6 +38,9 @@ const FIXTURE_URLS = {
   [SITE + '/novels/example-novel/chapter-1']: 'chapter.html',
 };
 
+FIXTURE_URLS['https://jut.su/anime/page-1/'] = 'real-jutsu.html';
+FIXTURE_URLS['https://ranobehub.org/ranobe?page=1'] = 'real-ranobehub.html';
+
 function makeFetch(log) {
   return async function fetchApi(url, options) {
     log.push({ url: String(url), options: options || null });
@@ -258,4 +261,25 @@ test('селектор карточки совпадает с самим эле�
   assert.equal(cards.length, 2);
   assert.equal(cards[0].name, 'Альфа');
   assert.equal(cards[0].path, SITE + '/novels/alpha');
+});
+
+test('реальный jut.su: живая разметка, предок-ссылка, обложка из style, кодировка', async () => {
+  const log = [];
+  const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'real-jutsu.json'), 'utf8'));
+  const plugin = loadPlugin(generatePluginCode(cfg), log);
+  const cards = await plugin.popularNovels('1');
+  assert.ok(cards.length >= 3, 'карточек должно быть не меньше трёх');
+  assert.equal(cards[0].name, 'Атака титанов');
+  assert.equal(cards[0].path, 'https://jut.su/shingekii-no-kyojin/');
+  assert.ok(String(cards[0].cover).startsWith('https://gen.jut.su/uploads/'), 'обложка из url(...)');
+  assert.equal(log[0].options && log[0].options.textEncoding, 'windows-1251');
+});
+
+test('реальный ranobehub: живая разметка, карточки с адресами и именами', async () => {
+  const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'real-ranobehub.json'), 'utf8'));
+  const plugin = loadPlugin(generatePluginCode(cfg), []);
+  const cards = await plugin.popularNovels('1');
+  assert.ok(cards.length >= 3, 'карточек должно быть не меньше трёх');
+  assert.ok(cards[0].path.startsWith('https://ranobehub.org/ranobe/'), 'адрес карточки');
+  assert.ok(cards[0].name && cards[0].name.length > 2, 'имя карточки не пустое');
 });

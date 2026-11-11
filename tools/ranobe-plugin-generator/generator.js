@@ -43,6 +43,12 @@ function validateConfig(config) {
       if (!config.search[field]) errors.push('search: нет поля "' + field + '"');
     }
   }
+  if (config.encoding !== undefined && typeof config.encoding !== 'string') {
+    errors.push('поле "encoding" должно быть строкой, например "windows-1251"');
+  }
+  if (config.headers !== undefined && (typeof config.headers !== 'object' || Array.isArray(config.headers))) {
+    errors.push('поле "headers" должно быть объектом строк');
+  }
   if (config.novel) {
     if (!config.novel.name) errors.push('novel: нет поля "name"');
     if (!config.novel.chapters || !config.novel.chapters.item || !config.novel.chapters.path) {
@@ -115,7 +121,12 @@ function generatePluginCode(config) {
   lines.push('const pluginName = ' + JSON.stringify(config.name) + ';');
   lines.push('const lang = ' + JSON.stringify(config.lang) + ';');
   lines.push('const version = ' + version + ';');
+  lines.push('');  const init = {};
+  if (config.headers) init.headers = config.headers;
+  if (config.encoding) init.textEncoding = config.encoding;
+  lines.push('const requestInit = ' + JSON.stringify(init) + ';');
   lines.push('');
+
   lines.push('// Селекторы из конфига: «селектор» берёт текст, «селектор@атрибут» берёт атрибут.');
   if (popular) lines.push('const popularCard = ' + JSON.stringify(cardShape(popular), null, 2) + ';');
   if (latest) lines.push('const latestCard = ' + JSON.stringify(cardShape(latest), null, 2) + ';');
@@ -142,10 +153,30 @@ function generatePluginCode(config) {
   lines.push('  const base = site.charAt(site.length - 1) === "/" ? site.slice(0, -1) : site;');
   lines.push('  return text.charAt(0) === "/" ? base + text : base + "/" + text;');
   lines.push('}');
+  lines.push('// Адрес из значения стиля: background: url(...) — обычный способ обложек.');
+  lines.push('function extractUrl(value) {');
+  lines.push('  if (!value) return null;');
+  lines.push('  const m = String(value).match(/url\\(([\'\"]?)([^\'\")]+)\\1\\)/i);');
+  lines.push('  return m ? m[2] : value;');
+  lines.push('}');
   lines.push('');
   lines.push('// Значение карточки по спецификации: атрибут или текст первого совпадения.');
   lines.push('function pickValue($, root, spec) {');
   lines.push('  if (!spec) return null;');
+  lines.push('  if (spec.charAt(0) === "^") {');
+  lines.push('    const up = parseSpec(spec.slice(1));');
+  lines.push('    let el = root;');
+  lines.push('    for (let i = 0; i < 6; i += 1) {');
+  lines.push('      el = el.parent();');
+  lines.push('      if (!el || !el.length) return null;');
+  lines.push('      if (el.is(up.sel)) break;');
+  lines.push('    }');
+  lines.push('    if (up.attr) {');
+  lines.push('      const value = el.attr(up.attr);');
+  lines.push('      return value == null ? null : String(value).trim();');
+  lines.push('    }');
+  lines.push('    return el.text().trim() || null;');
+  lines.push('  }');
   lines.push('  const parsed = parseSpec(spec);');
   lines.push('  let el = root.find(parsed.sel).first();');
   lines.push('  if (!el.length && root.is && root.is(parsed.sel)) el = root;');
@@ -173,14 +204,14 @@ function generatePluginCode(config) {
   lines.push('');
   lines.push('// Страница каталога: карточки новелл с абсолютными адресами.');
   lines.push('async function fetchCards(pageUrl, spec) {');
-  lines.push('  const res = await fetchApi(pageUrl);');
+  lines.push('  const res = await fetchApi(pageUrl, requestInit);');
   lines.push('  const body = await res.text();');
   lines.push('  const $ = load(body);');
   lines.push('  return $(spec.item).toArray().map((el) => {');
   lines.push('    const card = $(el);');
   lines.push('    const name = pickValue($, card, spec.name);');
   lines.push('    const path = pickValue($, card, spec.link);');
-  lines.push('    const cover = absoluteUrl(pickValue($, card, spec.cover));');
+  lines.push('    const cover = absoluteUrl(extractUrl(pickValue($, card, spec.cover)));');
   lines.push('    if (!name || !path) return null;');
   lines.push('    return { name: name, path: absoluteUrl(path), cover: cover };');
   lines.push('  }).filter(Boolean);');
@@ -211,7 +242,7 @@ function generatePluginCode(config) {
     lines.push('');
     lines.push('// Страница новеллы: поля, теги и главы с датами в ISO.');
     lines.push('async function novelDetails(novelUrl) {');
-    lines.push('  const res = await fetchApi(absoluteUrl(novelUrl));');
+    lines.push('  const res = await fetchApi(absoluteUrl(novelUrl), requestInit);');
     lines.push('  const body = await res.text();');
     lines.push('  const $ = load(body);');
     lines.push('  const root = $.root();');
@@ -235,7 +266,7 @@ function generatePluginCode(config) {
     lines.push('    name: pickValue($, root, novel.name),');
     lines.push('    author: pickValue($, root, novel.author),');
     lines.push('    artist: pickValue($, root, novel.artist),');
-    lines.push('    cover: absoluteUrl(pickValue($, root, novel.cover)),');
+    lines.push('    cover: absoluteUrl(extractUrl(pickValue($, root, novel.cover))),');
     lines.push('    description: pickValue($, root, novel.description),');
     lines.push('    status: pickValue($, root, novel.status),');
     lines.push('    tags: tags,');
@@ -247,7 +278,7 @@ function generatePluginCode(config) {
     lines.push('');
     lines.push('// Текст главы: чистка служебных блоков, режим «text» или «html» из конфига.');
     lines.push('async function chapterNovelContent(chapterUrl) {');
-    lines.push('  const res = await fetchApi(absoluteUrl(chapterUrl));');
+    lines.push('  const res = await fetchApi(absoluteUrl(chapterUrl), requestInit);');
     lines.push('  const body = await res.text();');
     lines.push('  const $ = load(body);');
     lines.push('  const holder = $.root().find(chapter.content).first();');
