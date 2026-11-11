@@ -1,0 +1,20 @@
+{
+  "id": "jutsu.anime",
+  "name": "Jut.su",
+  "site": "https://jut.su",
+  "lang": "ru",
+  "version": 1,
+  "encoding": "windows-1251",
+  "headers": {
+    "Referer": "https://jut.su/"
+  },
+  "listings": {
+    "popular": {
+      "path": "/anime/page-{page}/",
+      "item": ".all_anime",
+      "name": ".aaname",
+      "link": "^a@href",
+      "cover": ".all_anime_image@style"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "ranobe-plugin-generator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Генератор плагинов ранобэ-сайтов для рантайма новелл Takami",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "devDependencies": {
+    "cheerio": "^1.0.0",
+    "dayjs": "^1.11.13"
+  }
+}

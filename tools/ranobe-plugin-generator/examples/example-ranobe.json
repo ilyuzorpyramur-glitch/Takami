@@ -1,0 +1,52 @@
+{
+  "id": "example.ranobe",
+  "name": "Example Ranobe",
+  "site": "https://example.org",
+  "lang": "ru",
+  "version": 1,
+  "iconUrl": "https://example.org/icon.png",
+  "listings": {
+    "popular": {
+      "path": "/catalog?page={page}",
+      "item": ".catalog-card",
+      "name": ".card-title",
+      "link": ".card-title@href",
+      "cover": "img.cover@src"
+    },
+    "latest": {
+      "path": "/updates?page={page}",
+      "item": ".catalog-card",
+      "name": ".card-title",
+      "link": ".card-title@href",
+      "cover": "img.cover@src"
+    }
+  },
+  "search": {
+    "path": "/search?q={query}&page={page}",
+    "item": ".catalog-card",
+    "name": ".card-title",
+    "link": ".card-title@href",
+    "cover": "img.cover@src",
+    "queryEncoding": "uriComponent"
+  },
+  "novel": {
+    "name": "h1.title",
+    "author": ".author",
+    "artist": ".artist",
+    "cover": ".poster img@src",
+    "description": ".summary",
+    "status": ".status",
+    "tags": ".tags a",
+    "chapters": {
+      "item": ".chapter-item",
+      "name": ".chapter-name",
+      "path": "a@href",
+      "releaseTime": ".chapter-time@datetime"
+    }
+  },
+  "chapter": {
+    "content": ".chapter-content",
+    "mode": "text",
+    "remove": [".ad"]
+  }
+}
