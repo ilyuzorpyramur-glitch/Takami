@@ -5,6 +5,7 @@ import eu.kanade.tachiyomi.extension.novel.NovelExtensionManager
 import eu.kanade.tachiyomi.novelsource.NovelCatalogueSource
 import eu.kanade.tachiyomi.novelsource.NovelSource
 import eu.kanade.tachiyomi.novelsource.online.NovelHttpSource
+import eu.kanade.tachiyomi.takami.novel.NovelForgeSources
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -53,6 +54,16 @@ class AndroidNovelSourceManager(
 
     private val stubSourcesMap = ConcurrentHashMap<Long, StubNovelSource>()
 
+    // Источники, собранные в приложении: живут рядом с плагинами.
+    private val takamiSources = ConcurrentHashMap<Long, NovelSource>()
+
+    private fun publish(base: Map<Long, NovelSource>) {
+        val merged = ConcurrentHashMap(base)
+        merged.putAll(takamiSources)
+        sourcesMapFlow.value = merged
+        _isInitialized.value = true
+    }
+
     override val catalogueSources: Flow<List<NovelCatalogueSource>> = sourcesMapFlow.map {
         it.values.filterIsInstance<NovelCatalogueSource>()
     }
@@ -79,9 +90,22 @@ class AndroidNovelSourceManager(
                     }.onSuccess { omniSource ->
                         mutableMap[omniSource.id] = omniSource
                     }
-                    sourcesMapFlow.value = mutableMap
-                    _isInitialized.value = true
+                    publish(mutableMap)
                 }
+        }
+
+        NovelForgeSources.init(context)
+        scope.launch {
+            NovelForgeSources.specs.collectLatest { specs ->
+                takamiSources.clear()
+                specs.forEach { spec ->
+                    NovelForgeSources.source(spec.host)?.let { takamiSources[it.id] = it }
+                }
+                publish(sourcesMapFlow.value)
+                logcat(LogPriority.DEBUG) {
+                    "NovelForge: источников " + takamiSources.size + " из " + specs.size
+                }
+            }
         }
 
         scope.launch {

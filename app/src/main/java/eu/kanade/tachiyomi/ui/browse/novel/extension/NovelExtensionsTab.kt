@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AddLink
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Inventory2
@@ -57,6 +58,11 @@ fun novelExtensionsTab(
         badgeNumber = state.updates.takeIf { it > 0 },
         searchEnabled = true,
         actions = persistentListOf(
+            AppBar.OverflowAction(
+                title = NovelForgeStrings.ADD_BY_LINK,
+                icon = Icons.Outlined.AddLink,
+                onClick = { navigator.push(NovelForgeScreen()) },
+            ),
             AppBar.OverflowAction(
                 title = stringResource(MR.strings.action_filter),
                 icon = Icons.Outlined.FilterList,

@@ -55,9 +55,15 @@ class AndroidMangaSourceManager(
 
     private val stubSourcesMap = ConcurrentHashMap<Long, StubMangaSource>()
 
-    // Номера источников, созданных в приложении: при обновлении списка
-    // расширений их надо переносить в новую карту, а удалённые — убирать.
-    private val takamiSourceIds = mutableSetOf<Long>()
+    // Источники, собранные в приложении: живут рядом с плагинами.
+    private val takamiSources = ConcurrentHashMap<Long, MangaSource>()
+
+    private fun publish(base: Map<Long, MangaSource>) {
+        val merged = ConcurrentHashMap(base)
+        merged.putAll(takamiSources)
+        sourcesMapFlow.value = merged
+        _isInitialized.value = true
+    }
 
     override val catalogueSources: Flow<List<CatalogueSource>> = sourcesMapFlow.map {
         it.values.filterIsInstance<CatalogueSource>()
@@ -67,18 +73,11 @@ class AndroidMangaSourceManager(
         MangaForgeSources.init(context)
         scope.launch {
             MangaForgeSources.specs.collectLatest { specs ->
-                val merged = ConcurrentHashMap(sourcesMapFlow.value)
-                val alive = specs.map { MangaForgeSources.source(it.host)?.id }.toSet()
-                merged.keys.retainAll { key -> key !in takamiSourceIds || key in alive }
-                takamiSourceIds.clear()
+                takamiSources.clear()
                 specs.forEach { spec ->
-                    MangaForgeSources.source(spec.host)?.let {
-                        merged[it.id] = it
-                        takamiSourceIds += it.id
-                    }
+                    MangaForgeSources.source(spec.host)?.let { takamiSources[it.id] = it }
                 }
-                sourcesMapFlow.value = merged
-                _isInitialized.value = true
+                publish(sourcesMapFlow.value)
             }
         }
 
@@ -100,8 +99,7 @@ class AndroidMangaSourceManager(
                             registerStubSource(StubMangaSource.from(it))
                         }
                     }
-                    sourcesMapFlow.value = mutableMap
-                    _isInitialized.value = true
+                    publish(mutableMap)
                 }
         }
 
