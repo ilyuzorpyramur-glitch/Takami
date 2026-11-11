@@ -34,10 +34,10 @@ object NovelForgeSources {
     /** Готовая спека последней удачной сборки. */
     val ready: StateFlow<NovelSpec?> = _ready.asStateFlow()
 
-    private val _failure = MutableStateFlow<NovelForge.Failure?>(null)
+    private val _failure = MutableStateFlow<NovelOutcome.Failure?>(null)
 
     /** Причина отказа последней сборки. */
-    val failure: StateFlow<NovelForge.Failure?> = _failure.asStateFlow()
+    val failure: StateFlow<NovelOutcome.Failure?> = _failure.asStateFlow()
 
     fun init(context: Context) {
         if (store != null) return
@@ -57,13 +57,13 @@ object NovelForgeSources {
 
     suspend fun install(rawUrl: String): NovelSpec? = withContext(Dispatchers.IO) {
         when (val built = forge.build(rawUrl)) {
-            is NovelForge.Built -> {
+            is NovelOutcome.Built -> {
                 save(built.spec)
                 _ready.value = built.spec
                 _failure.value = null
                 built.spec
             }
-            is NovelForge.Failure -> {
+            is NovelOutcome.Failure -> {
                 _ready.value = null
                 _failure.value = built
                 null

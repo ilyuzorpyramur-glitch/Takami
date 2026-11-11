@@ -161,7 +161,7 @@ class NovelEngine(
         val doc = Jsoup.parse(html, pageUrl)
         val root = spec.text.containerSelector?.takeIf { it.isNotBlank() }
             ?.let { doc.selectFirst(it) }
-            ?: NovelAutoDetect.text(doc)?.let { doc.selectFirst(it) }
+            ?: NovelAutoDetect.text(doc)?.let { doc.selectFirst(it.containerSelector) }
             ?: doc.body()
             ?: return ""
         spec.text.dropSelectors.forEach { selector ->

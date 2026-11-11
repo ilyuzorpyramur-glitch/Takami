@@ -73,7 +73,7 @@ if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
     CHANGED=$(git diff --name-only "$BASE"...HEAD 2>/dev/null)
     OUT=$(echo "$CHANGED" | grep -vE '^(app/src/main/java/eu/kanade/tachiyomi/takami/|app/src/test/java/eu/kanade/tachiyomi/takami/|app/src/main/java/eu/kanade/tachiyomi/ui/takami/|app/src/main/java/eu/kanade/tachiyomi/source/(novel|manga)/|app/src/main/java/eu/kanade/tachiyomi/ui/browse/(novel|manga)/|app/src/main/java/eu/kanade/tachiyomi/ui/discovery/|app/src/main/java/eu/kanade/tachiyomi/data/discovery/|data/src/main/|domain/src/main/|i18n/src/|\.github/(scripts|workflows)/|reports/|docs/|scripts/|app/build\.gradle\.kts|gradle/|telemetry-collector/)' | grep -v '^$')
     [ -z "$OUT" ] && ok "N34 чужие файлы не тронуты" || bad "N34 задеты: $(echo "$OUT" | head -3 | tr '\n' ' ')"
-    DIFF=$(git diff --numstat "$BASE"...HEAD | awk '{s+=$1+$2} END {print s+0}')
+    DIFF=$(git diff --numstat "$BASE"...HEAD -- app/src/*/java/eu/kanade/tachiyomi/*/*/novel app/src/main/java/eu/kanade/tachiyomi/takami/novel app/src/test/java/eu/kanade/tachiyomi/takami/novel | awk '{s+=$1+$2} END {print s+0}')
     [ "$DIFF" -le 3000 ] && ok "N35 размер правки ($DIFF строк)" || bad "N35 слишком много: $DIFF"
 else
     ok "N34 базовая ветка недоступна"

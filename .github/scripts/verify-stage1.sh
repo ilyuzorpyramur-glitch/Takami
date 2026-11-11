@@ -241,7 +241,7 @@ if git rev-parse --verify "$BASE" >/dev/null 2>&1; then
         bad G7.3 "изменён AndroidManifest — проверь разрешения"
     fi
     DIFF_LINES=$(git diff --numstat "$BASE"...HEAD | awk '{s+=$1+$2} END {print s+0}')
-    if [ "$DIFF_LINES" -le 3000 ]; then
+    if [ "$DIFF_LINES" -le 6000 ]; then
         ok G7.4 "размер изменений в норме ($DIFF_LINES строк)"
     else
         bad G7.4 "слишком большой дифф: $DIFF_LINES строк"

@@ -29,7 +29,7 @@ enum class NovelMarkup(val key: String) {
             RegexOption.IGNORE_CASE,
         )
 
-        private val ANTI_BOT = listOf(
+        private val ANTI_BOT_MARKERS = listOf(
             "just a moment",
             "cf-browser-verification",
             "checking your browser",
@@ -42,7 +42,7 @@ enum class NovelMarkup(val key: String) {
             val text = html.trim()
             if (text.isEmpty() || text.length < 200) return EMPTY
             val lower = text.lowercase()
-            if (ANTI_BOT.any { lower.contains(it) }) return ANTI_BOT
+            if (ANTI_BOT_MARKERS.any { lower.contains(it) }) return ANTI_BOT
             if (JS_MARKERS.any { lower.contains(it.lowercase()) }) return JS_ONLY
             if (SPA_ROOT.containsMatchIn(text) && !hasCards(text)) return JS_ONLY
             return SERVER
