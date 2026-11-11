@@ -68,7 +68,7 @@ class NovelForge(
             host = host,
             baseUrl = base,
             name = siteName(doc, host),
-            lang = "ru",
+            lang = detectLang(doc),
             catalog = catalog,
             createdAt = System.currentTimeMillis(),
         )
@@ -135,6 +135,13 @@ class NovelForge(
             chaptersCount = chapters.size,
             textChars = chapterText.length,
         )
+    }
+
+    /** Язык страницы из атрибута html lang; иначе русский. */
+    private fun detectLang(doc: Document): String {
+        val raw = doc.selectFirst("html")?.attr("lang").orEmpty().trim().lowercase()
+        val code = raw.substringBefore("-").substringBefore("_")
+        return if (code.length == 2 && code.all { it.isLetter() }) code else "ru"
     }
 
     private fun fail(reason: String, message: String): NovelOutcome.Failure =

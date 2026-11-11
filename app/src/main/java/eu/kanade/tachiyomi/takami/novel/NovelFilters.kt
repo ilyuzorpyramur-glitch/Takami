@@ -10,5 +10,6 @@ import eu.kanade.tachiyomi.novelsource.model.NovelFilterList
  * приложение покажет пустую панель, а не выдуманные поля.
  */
 object NovelFilters {
+    @Suppress("UNUSED_PARAMETER")
     fun build(spec: NovelSpec): NovelFilterList = NovelFilterList(emptyList())
 }

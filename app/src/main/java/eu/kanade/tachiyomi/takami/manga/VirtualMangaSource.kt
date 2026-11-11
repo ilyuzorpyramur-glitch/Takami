@@ -14,6 +14,7 @@ import eu.kanade.tachiyomi.source.model.SManga
  * Для приложения он неотличим от APK-расширения: тот же интерфейс,
  * та же карточка в источниках, та же читалка и загрузки.
  */
+@Suppress("OVERRIDE_DEPRECATION")
 class VirtualMangaSource(
     private val spec: MangaSpec,
     private val engine: MangaEngine = MangaEngine(),

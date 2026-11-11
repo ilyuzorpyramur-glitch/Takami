@@ -50,6 +50,7 @@ class VirtualNovelSource(
     override suspend fun getChapterText(chapter: SNovelChapter): String =
         engine.chapterText(spec, chapter)
 
+    @Suppress("OVERRIDE_DEPRECATION")
     // Приложение зовёт suspend-версии; старый путь оставлен ради
     // совместимости интерфейса и честно не поддерживается.
     override fun fetchPopularNovels(page: Int): Observable<NovelsPage> =

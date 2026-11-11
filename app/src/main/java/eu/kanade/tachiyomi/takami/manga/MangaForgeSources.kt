@@ -6,8 +6,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import eu.kanade.domain.source.service.SourcePreferences
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import java.io.File
 
 /**
@@ -88,7 +91,24 @@ object MangaForgeSources {
         runCatching { target.save(stamped) }
             .onFailure { logcat(LogPriority.ERROR, it) { "MangaForge: запись" } }
         _specs.value = target.list()
+        enableLanguage(stamped.lang)
         stamped
+    }
+
+    /**
+     * Включить язык источника в настройках.
+     *
+     * Без этого собранный источник существует, но не показывается в
+     * списке: приложение фильтрует источники по включённым языкам.
+     */
+    private fun enableLanguage(lang: String) {
+        if (lang.isBlank()) return
+        runCatching {
+            val preferences = Injekt.get<SourcePreferences>()
+            val current = preferences.enabledLanguages().get()
+            if ("all" in current || lang in current) return
+            preferences.enabledLanguages().set(current + lang)
+        }.onFailure { logcat(LogPriority.ERROR, it) { "Язык источника: " + lang } }
     }
 
     suspend fun remove(host: String): Boolean = withContext(Dispatchers.IO) {

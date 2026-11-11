@@ -163,7 +163,6 @@ class NovelEngine(
             ?.let { doc.selectFirst(it) }
             ?: NovelAutoDetect.text(doc)?.let { doc.selectFirst(it.containerSelector) }
             ?: doc.body()
-            ?: return ""
         spec.text.dropSelectors.forEach { selector ->
             runCatching { root.select(selector).remove() }
         }

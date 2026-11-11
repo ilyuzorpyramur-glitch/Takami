@@ -15,5 +15,6 @@ import eu.kanade.tachiyomi.source.model.FilterList
  * поля.
  */
 object MangaFilters {
+    @Suppress("UNUSED_PARAMETER")
     fun build(spec: MangaSpec): FilterList = FilterList(emptyList())
 }
